@@ -30,7 +30,7 @@ The beacon is native Win32 with no CRT API dependencies in the IAT. All Windows 
   ┌─────────────────────────────────┐           ┌─────────────────────────┐
   │                                 │           │                         │
   │  ┌──────────┐   ┌────────────┐  │  HTTP/S   │  ┌─────────┐            │
-  │  │ Operator │──>│ Teamserver │─ ┼──── // ───┼─>│ Beacon  │──[WinAPI]  │
+  │  │ Operator │──>│ Teamserver │──┼──── // ───┼─>│ Beacon  │──[WinAPI]  │
   │  │ Browser  │   └──────┬─────┘  │           │  └─────────┘            │
   │  └──────────┘          │        │           │                         │
   │                   ┌────┴─────┐  │           │                         │
