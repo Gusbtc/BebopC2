@@ -28,6 +28,7 @@ type BuildParams struct {
 	UseHTTPS         bool   // beacon uses HTTPS (WINHTTP_FLAG_SECURE)
 	IgnoreCertErrors bool   // beacon ignores TLS cert errors (self-signed cert)
 	Format           string // output format: "exe" (default) or "bin" (shellcode via donut)
+	SessionPort      int    // TCP port for session mode (0 = disabled)
 }
 
 func validate(p BuildParams) error {
@@ -59,6 +60,9 @@ func configH(p BuildParams) string {
 	}
 	if p.IgnoreCertErrors {
 		base += "#define IGNORE_CERT_ERRORS\n"
+	}
+	if p.SessionPort > 0 {
+		base += fmt.Sprintf("#define SESSION_PORT  %d\n", p.SessionPort)
 	}
 	return base
 }

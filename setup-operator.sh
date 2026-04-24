@@ -31,6 +31,7 @@ go build -o ../bin/operator-client .
 echo -e "  ${GREEN}[ok]${RESET} bin/operator-client"
 
 echo ""
-echo -e "${GREEN}${BOLD}ready.${RESET} run with:"
-echo -e "  ./bin/operator-client -port 9090"
+echo -e "${GREEN}${BOLD}ready.${RESET} starting operator client on port 9090..."
 echo ""
+cd ..
+exec ./bin/operator-client -port 9090

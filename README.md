@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.2-amber?style=for-the-badge&labelColor=black" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.3-amber?style=for-the-badge&labelColor=black" alt="Version">
   <img src="https://img.shields.io/badge/Win32-blue?style=for-the-badge&logo=c&labelColor=black" alt="Win32">
   <img src="https://img.shields.io/badge/Golang-Teamserver-00ADD8?style=for-the-badge&logo=go&labelColor=black" alt="Go">
   <img src="https://img.shields.io/badge/License-MIT-red?style=for-the-badge&labelColor=black" alt="License">
@@ -52,7 +52,12 @@ The beacon is native Win32 with no CRT API dependencies in the IAT. All Windows 
 Single binary, no external dependencies. Manages beacon state, queues tasks, serves the operator UI, and cross-compiles beacons on the fly via MinGW.
 
 - Asynchronous task queue per beacon
-- Thread-safe in-memory store with JSON persistence and session restore on startup (load previous session or reset)
+- SQLite persistent store with session restore on startup (load previous session or reset)
+- Multi-operator authentication (bcrypt + JWT) with token revocation
+- Real-time operator chat via WebSocket (rate-limited, persisted in SQLite)
+- Interactive session mode — persistent TCP connections for low-latency commands
+- SOCKS5 proxy pivoting through beacon (auto-assigned ports 1080–1099)
+- WebSocket hub for real-time event broadcasting to all connected operators
 - RSA keypair generated at startup, kept in memory
 - Multiple listeners on different ports and protocols
 - On-demand beacon compilation with per-build string obfuscation
@@ -65,6 +70,8 @@ Lightweight implant for Windows x64. Communicates over WinHTTP, uses Windows CNG
 - All Windows APIs resolved via PEB walk + DJB2 hash (zero suspicious IAT entries)
 - Anonymous pipes capture output from spawned processes
 - Native command implementations (ls, ps, whoami, netstat, ipconfig, arp, drives, services, privs, env, clipboard, reg_query, reg_set, runas) via WinAPI, no `cmd.exe` unless explicitly requested
+- Interactive session mode — upgrades to persistent TCP for real-time shell I/O
+- SOCKS5 relay with channel-based bidirectional tunneling (up to 64 concurrent channels)
 - Integrity-level detection (Medium / High / SYSTEM) reported on registration
 - File transfer with chunked 64KB streaming (upload and download)
 
@@ -72,13 +79,16 @@ Lightweight implant for Windows x64. Communicates over WinHTTP, uses Windows CNG
 
 Browser-based UI with a terminal-centric workflow. Vanilla HTML/CSS/JS served by the operator-client binary. No build step.
 
+- JWT-authenticated login page
 - Tabbed terminals with persistent command history and output across tab switches
 - Event log with timestamped entries (new sessions, kills, task dispatches, connection changes)
-- Session map as a force-directed graph with zoom/pan, plus table and grid views
+- Real-time operator chat panel via WebSocket
+- Session map as a force-directed graph with zoom/pan, plus table view
+- Right-click context menus and double-click to interact with beacons, sessions, and listeners
+- Terminal fullscreen mode
 - Resizable panels between terminal and event log
 - Loot tab for exfiltrated file management (download, delete)
 - Toast notifications on new beacon callbacks
-- Context menus on beacon rows
 
 ## Evasion
 
@@ -143,32 +153,42 @@ The beacon is compiled on demand from the operator console's Build page. It hand
 
 ```
 teamserver/
-  server/          HTTP handlers, routing, listeners
-  store/           In-memory beacon/task/result store with TTL cleanup
-  models/          Beacon, Task, Result, Listener, Event, Terminal types
-  protocol/        Binary serialization + crypto (HKDF key derivation)
-  obfgen/          Build-time XOR string obfuscation
-  hashgen/         DJB2 API hash generator
-  builder/         Cross-compilation pipeline
-  persist/         JSON state persistence
-  ui/              Terminal UI helpers
+  server/              HTTP handlers, routing, listeners, WebSocket hub
+    session_listener   TCP session mode handler
+    shell_handler      Interactive shell connection manager
+    socks              SOCKS5 proxy relay manager
+    ws_operator        Operator WebSocket with chat + event broadcasting
+    hub                WebSocket connection hub
+  store/               SQLite-backed persistent store (tasks, results, chat)
+  auth/                Operator authentication (bcrypt, JWT, token revocation)
+  models/              Beacon, Task, Result, Listener, Event, Terminal, Chat types
+  protocol/            Binary serialization + crypto (HKDF key derivation)
+  obfgen/              Build-time XOR string obfuscation
+  hashgen/             DJB2 API hash generator
+  builder/             Cross-compilation pipeline
+  persist/             JSON state persistence (listeners, beacons, loot)
+  ui/                  Terminal UI helpers
 
 beacon/
   src/
-    main.c         Entry point, checkin loop
-    comms/http.c   WinHTTP communication
-    protocol/      AES-CBC + HMAC-SHA256 via CNG, HKDF sub-keys
-    exec/          Process execution (exec.c) + native commands (builtin.c)
-    resolve/       PEB walking + DJB2 hash resolution (~100 APIs)
-    transfer/      File upload/download with 64KB chunked streaming
-  include/         Headers, config, generated hash tables, XOR strings
+    main.c             Entry point, checkin loop
+    comms/
+      http.c           WinHTTP communication
+      session.c        Persistent TCP session mode
+      shell.c          Interactive shell over TCP
+      socks.c          SOCKS5 relay channels
+    protocol/          AES-CBC + HMAC-SHA256 via CNG, HKDF sub-keys
+    exec/              Process execution (exec.c) + native commands (builtin.c)
+    resolve/           PEB walking + DJB2 hash resolution (~100 APIs)
+    transfer/          File upload/download with 64KB chunked streaming
+  include/             Headers, config, generated hash tables, XOR strings
 
 operator-client/
   static/
-    pages/         HTML (sessions, listeners, build, interact, loot)
-    css/           Stylesheet
-    js/            Application logic (xterm.js terminal)
-    img/           Assets
+    pages/             HTML (sessions, listeners, build, login)
+    css/               Stylesheet
+    js/                Application logic (xterm.js terminal)
+    img/               Assets
 ```
 
 ## Roadmap
@@ -183,14 +203,18 @@ operator-client/
 - [x] File transfer (upload/download with 64KB chunked streaming)
 - [x] HKDF domain separation for AES and HMAC sub-keys
 - [x] Full IAT cleanup (all beacon APIs resolved dynamically)
+- [x] Interactive session mode (real-time TCP shell)
+- [x] SOCKS5 proxy pivoting through beacon
+- [x] SQLite persistent store (replace JSON)
+- [x] Multi-operator authentication (bcrypt + JWT + token revocation)
+- [x] Real-time operator chat via WebSocket
+- [x] WebSocket-based operator communication for live UI updates
+- [x] Operator management CLI (add, delete, list)
 
 ### Next
 - [ ] Ekko sleep masking (RC4 image encryption, VirtualProtect RW/RX toggle)
 - [ ] Direct syscalls to bypass EDR hooks (SysWhispers-style)
 - [ ] BOF loader for in-memory Beacon Object Files
-- [ ] SQLite persistence (replace JSON)
-- [ ] SOCKS5 proxy through beacon for pivoting
-- [ ] Multi-operator support with authentication and roles
 - [ ] Malleable C2 profiles (configurable HTTP headers, URIs, body encoding)
 - [ ] Beacon staging (minimal stager that downloads full beacon)
 

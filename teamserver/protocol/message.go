@@ -15,6 +15,29 @@ const (
 )
 
 const (
+	TaskInteractive uint8 = 20
+	TaskShellStart  uint8 = 21
+	TaskShellInput  uint8 = 22
+	TaskShellOutput uint8 = 23
+	TaskShellStop   uint8 = 24
+)
+
+const (
+	TaskSocksOpen  uint8 = 25
+	TaskSocksData  uint8 = 26
+	TaskSocksClose uint8 = 27
+	TaskSocksAck   uint8 = 28
+	TaskSocksStart uint8 = 29
+	TaskSocksStop  uint8 = 30
+)
+
+const (
+	ConnSession uint8 = 0
+	ConnShell   uint8 = 1
+	ConnSocks   uint8 = 2
+)
+
+const (
 	FlagNone         uint16 = 0
 	FlagError        uint16 = 1
 	FlagRunning      uint16 = 2

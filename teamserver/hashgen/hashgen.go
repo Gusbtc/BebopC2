@@ -144,6 +144,42 @@ var functions = []fnEntry{
 	{"SetEvent", "Kernel32"},
 	{"CloseHandle", "Kernel32"},
 	{"Sleep", "Kernel32"},
+	// Winsock2 — session mode
+	{"WSAStartup", "Winsock2"},
+	{"WSACleanup", "Winsock2"},
+	{"socket", "Winsock2"},
+	{"connect", "Winsock2"},
+	{"send", "Winsock2"},
+	{"recv", "Winsock2"},
+	{"closesocket", "Winsock2"},
+	// Winsock2 — shell TCP
+	{"inet_addr", "Winsock2"},
+	{"htons", "Winsock2"},
+	// Winsock2 — SOCKS5 pivoting
+	{"getaddrinfo", "Winsock2"},
+	{"freeaddrinfo", "Winsock2"},
+	{"ioctlsocket", "Winsock2"},
+	{"select", "Winsock2"},
+	// Kernel32 — threading (session mode)
+	{"CreateThread", "Kernel32"},
+	{"InitializeCriticalSection", "Kernel32"},
+	{"EnterCriticalSection", "Kernel32"},
+	{"LeaveCriticalSection", "Kernel32"},
+	{"DeleteCriticalSection", "Kernel32"},
+	{"WaitForMultipleObjects", "Kernel32"},
+	// Kernel32 — process/pipe (session shell)
+	{"PeekNamedPipe", "Kernel32"},
+	{"CreateProcessW", "Kernel32"},
+	// Kernel32 — ConPTY (session shell)
+	{"CreatePseudoConsole", "Kernel32"},
+	{"ClosePseudoConsole", "Kernel32"},
+	{"ResizePseudoConsole", "Kernel32"},
+	{"InitializeProcThreadAttributeList", "Kernel32"},
+	{"UpdateProcThreadAttribute", "Kernel32"},
+	{"DeleteProcThreadAttributeList", "Kernel32"},
+	{"HeapAlloc", "Kernel32"},
+	{"GetProcessHeap", "Kernel32"},
+	{"HeapFree", "Kernel32"},
 }
 
 func Generate(outDir string) error {

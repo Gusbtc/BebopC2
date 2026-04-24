@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BEBOP // Login</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        /* ---- LOGIN PAGE (scoped) ---- */
+        html, body { height: 100%; overflow: hidden; }
+
+        body.login-body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        .login-wrap {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            max-width: 420px;
+            padding: 24px;
+            animation: login-in 0.5s ease both;
+        }
+
+        @keyframes login-in {
+            from { opacity: 0; transform: translateY(6px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .login-brand {
+            text-align: center;
+            margin-bottom: 28px;
+        }
+
+        .login-brand .logo {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 44px;
+            color: var(--amber);
+            letter-spacing: 10px;
+            text-transform: uppercase;
+            display: inline-block;
+        }
+
+        .login-brand .sub {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            opacity: 0.7;
+            margin-top: 4px;
+        }
+
+        .login-brand .tagline {
+            font-family: 'Inter', sans-serif;
+            font-style: italic;
+            font-size: 12px;
+            color: #888;
+            margin-top: 14px;
+            letter-spacing: 1px;
+        }
+
+        .login-card {
+            background: rgba(10, 14, 26, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid var(--border);
+            border-top: 1px solid var(--border-amber);
+            padding: 28px 28px 24px 28px;
+            position: relative;
+        }
+
+        .login-card::before {
+            content: '// auth';
+            position: absolute;
+            top: -11px;
+            left: 16px;
+            padding: 2px 10px;
+            background: rgba(10, 14, 26, 0.96);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid var(--border-amber);
+            box-shadow:
+                0 0 12px rgba(255, 176, 0, 0.15),
+                inset 0 1px 0 rgba(255, 176, 0, 0.08);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 2.5px;
+            color: var(--amber);
+            text-transform: uppercase;
+        }
+
+        .login-row { margin-bottom: 14px; }
+        .login-row.split { display: grid; grid-template-columns: 1fr 96px; gap: 10px; }
+
+        .login-row label {
+            display: block;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            opacity: 0.75;
+            margin-bottom: 5px;
+        }
+
+        .login-row input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border);
+            border-radius: 0;
+            color: var(--text);
+            padding: 8px 11px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 13px;
+            letter-spacing: 1px;
+            transition: border-color 0.15s, background 0.15s;
+        }
+
+        .login-row input:focus {
+            outline: none;
+            border-color: var(--border-amber);
+            background: rgba(255, 176, 0, 0.03);
+        }
+
+        .login-btn {
+            width: 100%;
+            margin-top: 8px;
+            background: transparent;
+            border: 1px solid var(--border-amber);
+            color: var(--amber);
+            padding: 10px 16px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 12px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.08s;
+        }
+
+        .login-btn:hover:not(:disabled) {
+            background: rgba(255, 176, 0, 0.08);
+            border-color: var(--amber);
+            color: var(--text);
+        }
+
+        .login-btn:active:not(:disabled) { transform: translateY(1px); }
+
+        .login-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .login-error {
+            display: none;
+            margin-top: 14px;
+            padding: 8px 11px;
+            border: 1px solid var(--border-orange);
+            background: rgba(200, 75, 49, 0.08);
+            color: var(--orange);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 11px;
+            letter-spacing: 1px;
+        }
+
+        .login-error.visible { display: block; animation: login-in 0.2s ease both; }
+
+        .login-foot {
+            text-align: center;
+            margin-top: 16px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 9px;
+            letter-spacing: 3px;
+            color: #555;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body class="login-body">
+    <div class="login-wrap">
+        <div class="login-brand">
+            <div class="logo">BEBOP</div>
+            <div class="sub">// C2 &nbsp;OPERATOR</div>
+            <div class="tagline">"3, 2, 1&hellip; Let's jam."</div>
+        </div>
+
+        <form id="login-form" class="login-card" autocomplete="on">
+            <div class="login-row split">
+                <div>
+                    <label for="tsIp">Teamserver</label>
+                    <input id="tsIp" type="text" placeholder="127.0.0.1" autocomplete="off" spellcheck="false" required>
+                </div>
+                <div>
+                    <label for="tsPort">Port</label>
+                    <input id="tsPort" type="number" placeholder="8080" value="8080" min="1" max="65535" required>
+                </div>
+            </div>
+
+            <div class="login-row">
+                <label for="username">Username</label>
+                <input id="username" type="text" autocomplete="username" spellcheck="false" required>
+            </div>
+
+            <div class="login-row">
+                <label for="password">Password</label>
+                <input id="password" type="password" autocomplete="current-password" required>
+            </div>
+
+            <button id="login-btn" class="login-btn" type="submit">Jack In</button>
+
+            <div id="login-error" class="login-error"></div>
+        </form>
+
+        <div class="login-foot">see you, space cowboy</div>
+    </div>
+
+    <script>
+        // ---- Stars (self-contained; app.js not loaded on login page) ----
+        (function initStars() {
+            const container = document.createElement('div');
+            container.id = 'stars';
+            document.documentElement.appendChild(container);
+            for (let i = 0; i < 150; i++) {
+                const s = document.createElement('div');
+                s.className = 'star';
+                s.style.left    = (Math.random() * 100).toFixed(2) + 'vw';
+                s.style.top     = (Math.random() * 100).toFixed(2) + 'vh';
+                s.style.opacity = (0.05 + Math.random() * 0.2).toFixed(2);
+                const size = Math.random() < 0.85 ? 1 : 2;
+                s.style.width  = size + 'px';
+                s.style.height = size + 'px';
+                container.appendChild(s);
+            }
+        })();
+
+        // ---- Login flow ----
+        (function () {
+            const $ip   = document.getElementById('tsIp');
+            const $port = document.getElementById('tsPort');
+            const $user = document.getElementById('username');
+            const $pass = document.getElementById('password');
+            const $btn  = document.getElementById('login-btn');
+            const $err  = document.getElementById('login-error');
+            const $form = document.getElementById('login-form');
+
+            // Prefill from localStorage
+            const savedIp   = localStorage.getItem('tsIp');
+            const savedPort = localStorage.getItem('tsPort');
+            if (savedIp)   $ip.value   = savedIp;
+            if (savedPort) $port.value = savedPort;
+
+            // Autofocus: server field if empty, else username
+            if (!$ip.value) {
+                $ip.focus();
+            } else {
+                $user.focus();
+            }
+
+            function showError(msg) {
+                $err.textContent = msg;
+                $err.classList.add('visible');
+            }
+
+            function clearError() {
+                $err.textContent = '';
+                $err.classList.remove('visible');
+            }
+
+            $form.addEventListener('submit', async function (e) {
+                e.preventDefault();
+                clearError();
+
+                const ip   = ($ip.value || '').trim();
+                const port = ($port.value || '').trim();
+                const user = $user.value;
+                const pass = $pass.value;
+
+                if (!ip || !port || !user || !pass) {
+                    showError('all fields required');
+                    return;
+                }
+
+                // Persist teamserver settings
+                localStorage.setItem('tsIp', ip);
+                localStorage.setItem('tsPort', port);
+
+                $btn.disabled = true;
+                const origLabel = $btn.textContent;
+                $btn.textContent = 'Connecting…';
+
+                const url = 'http://' + ip + ':' + port + '/api/auth/login';
+                let resp;
+                try {
+                    resp = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: user, password: pass })
+                    });
+                } catch (netErr) {
+                    $btn.disabled = false;
+                    $btn.textContent = origLabel;
+                    showError('cannot reach teamserver ' + ip + ':' + port);
+                    return;
+                }
+
+                if (resp.ok) {
+                    let data;
+                    try { data = await resp.json(); } catch (_) { data = null; }
+                    if (data && data.token) {
+                        localStorage.setItem('authToken', data.token);
+                        window.location.href = '/sessions';
+                        return;
+                    }
+                    $btn.disabled = false;
+                    $btn.textContent = origLabel;
+                    showError('malformed server response');
+                    return;
+                }
+
+                $btn.disabled = false;
+                $btn.textContent = origLabel;
+
+                if (resp.status === 401) {
+                    showError('invalid credentials');
+                    return;
+                }
+
+                let text = '';
+                try { text = (await resp.text()).trim(); } catch (_) {}
+                showError(text || ('login failed (' + resp.status + ')'));
+            });
+        })();
+    </script>
+</body>
+</html>

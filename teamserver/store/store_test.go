@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -9,12 +11,23 @@ import (
 	"c2/protocol"
 )
 
+func newStore(t *testing.T) *Store {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
 func newMeta(id uint32) *models.ImplantMetadata {
 	return &models.ImplantMetadata{ID: id, SessionKey: make([]byte, 32), Sleep: 60}
 }
 
 func TestRegisterAndGetBeacon(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	s.RegisterBeacon(newMeta(1))
 
 	b := s.GetBeacon(1)
@@ -30,14 +43,14 @@ func TestRegisterAndGetBeacon(t *testing.T) {
 }
 
 func TestGetBeacon_UnknownID(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	if s.GetBeacon(999) != nil {
 		t.Fatal("expected nil for unknown beacon")
 	}
 }
 
 func TestUpdateLastSeen(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	s.RegisterBeacon(newMeta(2))
 	before := s.GetBeacon(2).LastSeen
 
@@ -51,7 +64,7 @@ func TestUpdateLastSeen(t *testing.T) {
 }
 
 func TestGetNextTask_EmptyQueue(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	s.RegisterBeacon(newMeta(3))
 
 	if s.GetNextTask(3) != nil {
@@ -60,7 +73,7 @@ func TestGetNextTask_EmptyQueue(t *testing.T) {
 }
 
 func TestGetNextTask_ReturnsPendingAndMarksSent(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	s.RegisterBeacon(newMeta(4))
 	s.QueueTask(&models.Task{Label: 10, BeaconID: 4, Type: 12, Status: models.TaskStatusPending})
 
@@ -82,20 +95,20 @@ func TestGetNextTask_ReturnsPendingAndMarksSent(t *testing.T) {
 }
 
 func TestUpdateLastSeen_UnknownID(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	// must not panic on unknown ID
 	s.UpdateLastSeen(9999)
 }
 
 func TestListBeacons_Empty(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	if len(s.ListBeacons()) != 0 {
 		t.Fatal("expected empty slice")
 	}
 }
 
 func TestListBeacons_ReturnsCopies(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	s.RegisterBeacon(newMeta(10))
 	s.RegisterBeacon(newMeta(11))
 	beacons := s.ListBeacons()
@@ -111,7 +124,7 @@ func TestListBeacons_ReturnsCopies(t *testing.T) {
 }
 
 func TestStoreAndGetResults(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	s.RegisterBeacon(newMeta(20))
 	s.StoreResult(&models.Result{Label: 10, BeaconID: 20, Output: "root"})
 
@@ -125,7 +138,7 @@ func TestStoreAndGetResults(t *testing.T) {
 }
 
 func TestGetResultsSince(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	s.RegisterBeacon(newMeta(21))
 
 	before := time.Now()
@@ -144,7 +157,7 @@ func TestGetResultsSince(t *testing.T) {
 }
 
 func TestMarkTaskDone(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	s.RegisterBeacon(newMeta(22))
 	s.QueueTask(&models.Task{Label: 99, BeaconID: 22, Type: 12, Status: models.TaskStatusPending})
 	s.GetNextTask(22) // marks SENT
@@ -157,12 +170,12 @@ func TestMarkTaskDone(t *testing.T) {
 }
 
 func TestMarkTaskDone_UnknownLabel(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	s.MarkTaskDone(0xDEAD) // must not panic
 }
 
 func TestDeleteBeacon(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	meta := &models.ImplantMetadata{ID: 7, SessionKey: make([]byte, 32), Sleep: 5}
 	s.RegisterBeacon(meta)
 
@@ -175,16 +188,17 @@ func TestDeleteBeacon(t *testing.T) {
 	if s.GetBeacon(7) != nil {
 		t.Fatal("GetBeacon should return nil after DeleteBeacon")
 	}
-	s.mu.RLock()
-	_, hasTasks   := s.tasks[7]
-	_, hasResults := s.results[7]
-	s.mu.RUnlock()
-	if hasTasks   { t.Error("tasks entry should be removed") }
-	if hasResults { t.Error("results entry should be removed") }
+	// Verify tasks and results are cleaned up via public API
+	if s.GetNextTask(7) != nil {
+		t.Error("tasks entry should be removed after DeleteBeacon")
+	}
+	if len(s.GetResults(7)) != 0 {
+		t.Error("results entry should be removed after DeleteBeacon")
+	}
 }
 
 func TestAddAndListListeners(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	l := &models.Listener{Name: "test", Scheme: "http", Host: "127.0.0.1", Port: 9000}
 	s.AddListener(l)
 
@@ -202,7 +216,7 @@ func TestAddAndListListeners(t *testing.T) {
 }
 
 func TestGetListener(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	l := &models.Listener{Name: "x", Scheme: "https", Host: "10.0.0.1", Port: 443}
 	s.AddListener(l)
 
@@ -219,7 +233,7 @@ func TestGetListener(t *testing.T) {
 }
 
 func TestRemoveListener(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	l := &models.Listener{Name: "rm", Scheme: "http", Host: "127.0.0.1", Port: 9001}
 	s.AddListener(l)
 	id := l.ID
@@ -235,7 +249,7 @@ func TestRemoveListener(t *testing.T) {
 }
 
 func TestListenerIDsAreUnique(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	a := &models.Listener{Name: "a", Scheme: "http", Host: "127.0.0.1", Port: 9010}
 	b := &models.Listener{Name: "b", Scheme: "http", Host: "127.0.0.1", Port: 9011}
 	s.AddListener(a)
@@ -246,7 +260,7 @@ func TestListenerIDsAreUnique(t *testing.T) {
 }
 
 func TestAllResults(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	s.StoreResult(&models.Result{Label: 1, BeaconID: 10, Output: "a", ReceivedAt: time.Now()})
 	s.StoreResult(&models.Result{Label: 2, BeaconID: 10, Output: "b", ReceivedAt: time.Now()})
 	s.StoreResult(&models.Result{Label: 3, BeaconID: 20, Output: "c", ReceivedAt: time.Now()})
@@ -270,7 +284,7 @@ func TestAllResults(t *testing.T) {
 }
 
 func TestLoadBeacons(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	now := time.Now()
 	bs := []*models.Beacon{
 		{ImplantMetadata: models.ImplantMetadata{ID: 7, Hostname: "HOST"}, FirstSeen: now, LastSeen: now},
@@ -287,7 +301,7 @@ func TestLoadBeacons(t *testing.T) {
 }
 
 func TestLoadListeners(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	ls := []*models.Listener{
 		{ID: 3, Name: "a", Scheme: "http", Host: "h", Port: 80},
 		{ID: 7, Name: "b", Scheme: "https", Host: "h", Port: 443},
@@ -306,13 +320,9 @@ func TestLoadListeners(t *testing.T) {
 }
 
 func TestLoadResults(t *testing.T) {
-	s := New()
-	rs := map[uint32][]*models.Result{
-		42: {
-			{Label: 1, BeaconID: 42, Output: "out", ReceivedAt: time.Now()},
-		},
-	}
-	s.LoadResults(rs)
+	// LoadResults was removed; results are now persisted directly via StoreResult into SQLite.
+	s := newStore(t)
+	s.StoreResult(&models.Result{Label: 1, BeaconID: 42, Output: "out", ReceivedAt: time.Now()})
 
 	got := s.GetResults(42)
 	if len(got) != 1 {
@@ -324,7 +334,7 @@ func TestLoadResults(t *testing.T) {
 }
 
 func TestExfilFragmentAssembly(t *testing.T) {
-	s := New()
+	s := newStore(t)
 
 	// Fragment 0: [uint16 name_len=4]["file"]["AAAA"]
 	frag0 := []byte{4, 0, 'f', 'i', 'l', 'e', 'A', 'A', 'A', 'A'}
@@ -364,7 +374,7 @@ func TestExfilFragmentAssembly(t *testing.T) {
 }
 
 func TestExfilSingleFragment(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	// Single last-frag chunk: [uint16 name_len=3]["foo"]["XYZ"]
 	frag := []byte{3, 0, 'f', 'o', 'o', 'X', 'Y', 'Z'}
 	done, name, data := s.AddExfilFragment(99, 0, protocol.FlagLastFragment, frag)
@@ -380,7 +390,7 @@ func TestExfilSingleFragment(t *testing.T) {
 }
 
 func TestExfilDuplicateFragment(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	frag0 := []byte{3, 0, 'f', 'o', 'o', 'A', 'A'}
 	s.AddExfilFragment(50, 0, protocol.FlagFragmented, frag0)
 
@@ -399,7 +409,7 @@ func TestExfilDuplicateFragment(t *testing.T) {
 }
 
 func TestConcurrentRegisterAndCheckin(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	var wg sync.WaitGroup
 
 	for i := uint32(1); i <= 50; i++ {
@@ -431,7 +441,7 @@ func TestConcurrentRegisterAndCheckin(t *testing.T) {
 }
 
 func TestConcurrentTaskQueue(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	s.RegisterBeacon(newMeta(100))
 
 	var wg sync.WaitGroup
@@ -466,7 +476,7 @@ func TestConcurrentTaskQueue(t *testing.T) {
 }
 
 func TestConcurrentStoreResults(t *testing.T) {
-	s := New()
+	s := newStore(t)
 	var wg sync.WaitGroup
 	for i := uint32(0); i < 50; i++ {
 		wg.Add(2)
@@ -484,5 +494,84 @@ func TestConcurrentStoreResults(t *testing.T) {
 	all := s.AllResults()
 	if len(all[1]) != 50 {
 		t.Fatalf("expected 50 results, got %d", len(all[1]))
+	}
+}
+
+func TestAddChatMessage(t *testing.T) {
+	s := newStore(t)
+
+	before := time.Now().Add(-time.Second)
+	msg, err := s.AddChatMessage("alice", "hello")
+	if err != nil {
+		t.Fatalf("AddChatMessage: %v", err)
+	}
+	if msg == nil {
+		t.Fatal("expected non-nil message")
+	}
+	if msg.ID == 0 {
+		t.Fatalf("expected ID > 0, got %d", msg.ID)
+	}
+	if msg.Operator != "alice" {
+		t.Fatalf("operator = %q, want alice", msg.Operator)
+	}
+	if msg.Message != "hello" {
+		t.Fatalf("message = %q, want hello", msg.Message)
+	}
+	if msg.Timestamp.Before(before) {
+		t.Fatalf("timestamp %v older than %v", msg.Timestamp, before)
+	}
+}
+
+func TestListChatMessagesOrder(t *testing.T) {
+	s := newStore(t)
+
+	for i := 0; i < 3; i++ {
+		if _, err := s.AddChatMessage("op", fmt.Sprintf("m%d", i)); err != nil {
+			t.Fatalf("AddChatMessage: %v", err)
+		}
+	}
+
+	got := s.ListChatMessages(0)
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	for i, m := range got {
+		want := fmt.Sprintf("m%d", i)
+		if m.Message != want {
+			t.Fatalf("msg[%d] = %q, want %q", i, m.Message, want)
+		}
+	}
+}
+
+func TestListChatMessagesLimit(t *testing.T) {
+	s := newStore(t)
+
+	for i := 0; i < 5; i++ {
+		if _, err := s.AddChatMessage("op", fmt.Sprintf("m%d", i)); err != nil {
+			t.Fatalf("AddChatMessage: %v", err)
+		}
+	}
+
+	got := s.ListChatMessages(2)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	// Last 2 messages in chronological order: m3, m4.
+	if got[0].Message != "m3" || got[1].Message != "m4" {
+		t.Fatalf("got %q,%q want m3,m4", got[0].Message, got[1].Message)
+	}
+}
+
+func TestResetChatMessages(t *testing.T) {
+	s := newStore(t)
+	if _, err := s.AddChatMessage("op", "hi"); err != nil {
+		t.Fatalf("AddChatMessage: %v", err)
+	}
+	if err := s.ResetChatMessages(); err != nil {
+		t.Fatalf("ResetChatMessages: %v", err)
+	}
+	got := s.ListChatMessages(0)
+	if len(got) != 0 {
+		t.Fatalf("len after reset = %d, want 0", len(got))
 	}
 }

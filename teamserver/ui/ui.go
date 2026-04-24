@@ -103,3 +103,15 @@ func Errorf(label, format string, args ...any) {
 func Blank() {
 	fmt.Fprintln(os.Stdout)
 }
+
+func InputPrompt(label string) {
+	fmt.Fprintf(os.Stdout, "      %s%s%s %s▸%s ", gray, strings.ToUpper(label), reset, amber, reset)
+}
+
+func Divider() {
+	fmt.Fprintf(os.Stdout, "   %s%s%s\n", gray, strings.Repeat("─", 42), reset)
+}
+
+func CommandPrompt() {
+	fmt.Fprintf(os.Stdout, "\n   %sBEBOP%s %s▸%s ", amber, reset, amber, reset)
+}

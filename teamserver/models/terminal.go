@@ -10,3 +10,4 @@ type TerminalState struct {
 	CmdHistory []string        `json:"cmd_history"`
 	PollSince  int64           `json:"poll_since"`
 }
+

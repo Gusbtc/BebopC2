@@ -50,6 +50,7 @@ go build -o ../bin/teamserver .
 echo -e "  ${GREEN}[ok]${RESET} bin/teamserver"
 
 echo ""
-echo -e "${GREEN}${BOLD}ready.${RESET} run with:"
-echo -e "  ./bin/teamserver -port 8080"
+echo -e "${GREEN}${BOLD}ready.${RESET} starting teamserver on port 8080..."
 echo ""
+cd ..
+exec ./bin/teamserver -port 8080

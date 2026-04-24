@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include "crypto.h"
 #include "../../include/dynapi.h"
+#include "../../include/obf.h"
+#include "../../include/obf_strings.h"
 
 int gen_session_key(uint8_t key[32]) {
     NTSTATUS s = fnBCryptGenRandom(NULL, key, 32, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
@@ -45,8 +47,12 @@ int aes_encrypt(const uint8_t *key, const uint8_t *plain, DWORD plain_len,
 
     /* Derive separate sub-keys for AES and HMAC */
     uint8_t aes_key[32], hmac_key[32];
-    if (derive_key(key, "aes-cbc", aes_key) != 0) goto cleanup;
-    if (derive_key(key, "hmac-sha256", hmac_key) != 0) goto cleanup;
+    char lbl_aes[ENC_CRYPTO_AES_CBC_LEN + 1];
+    xor_dec(lbl_aes, ENC_CRYPTO_AES_CBC, ENC_CRYPTO_AES_CBC_LEN);
+    char lbl_hmac[ENC_CRYPTO_HMAC_SHA256_LEN + 1];
+    xor_dec(lbl_hmac, ENC_CRYPTO_HMAC_SHA256, ENC_CRYPTO_HMAC_SHA256_LEN);
+    if (derive_key(key, lbl_aes, aes_key) != 0) goto cleanup;
+    if (derive_key(key, lbl_hmac, hmac_key) != 0) goto cleanup;
 
     /* 1. Generate random IV */
     uint8_t iv[16];
@@ -121,8 +127,12 @@ int aes_decrypt(const uint8_t *key, const uint8_t *data, DWORD data_len,
 
     /* Derive separate sub-keys */
     uint8_t aes_key[32], hmac_key[32];
-    if (derive_key(key, "aes-cbc", aes_key) != 0) return -1;
-    if (derive_key(key, "hmac-sha256", hmac_key) != 0) {
+    char lbl_aes[ENC_CRYPTO_AES_CBC_LEN + 1];
+    xor_dec(lbl_aes, ENC_CRYPTO_AES_CBC, ENC_CRYPTO_AES_CBC_LEN);
+    char lbl_hmac[ENC_CRYPTO_HMAC_SHA256_LEN + 1];
+    xor_dec(lbl_hmac, ENC_CRYPTO_HMAC_SHA256, ENC_CRYPTO_HMAC_SHA256_LEN);
+    if (derive_key(key, lbl_aes, aes_key) != 0) return -1;
+    if (derive_key(key, lbl_hmac, hmac_key) != 0) {
         SecureZeroMemory(aes_key, 32);
         return -1;
     }

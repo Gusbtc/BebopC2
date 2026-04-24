@@ -19,12 +19,11 @@
             <span class="conn-dot" id="conn-dot"></span>
             <span id="conn-status">OFFLINE</span>
         </div>
-        <div class="settings">
-            <label>Teamserver</label>
-            <input id="tsIp"   type="text" placeholder="192.168.1.100" title="IP or hostname">
-            <span class="sep">:</span>
-            <input id="tsPort" type="text" placeholder="8080" title="Port">
-            <button onclick="saveSettings()">Connect</button>
+        <div class="header-actions">
+            <button type="button" class="icon-btn" onclick="openSettings()" title="Teamserver connection">
+                <svg class="icon-btn-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span class="icon-btn-text">settings</span>
+            </button>
         </div>
     </header>
 
@@ -35,11 +34,8 @@
                 <div class="view-controls" style="display: flex; gap: 8px;">
                     <button id="btn-view-table" onclick="setView('table')" class="active">Table View</button>
                     <button id="btn-view-map" onclick="setView('map')">Graph View</button>
-                    <button id="btn-view-grid" onclick="setView('grid')">Grid View</button>
                 </div>
             </div>
-
-            <div id="sessions-grid" class="sessions-grid" style="display:none"></div>
 
             <div id="sessions-table-view">
                 <div class="table-container">
@@ -55,7 +51,6 @@
                                 <th>Listener</th>
                                 <th>Sleep</th>
                                 <th>Last Seen</th>
-                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="beacons-table-body"></tbody>
@@ -97,6 +92,10 @@
                 <div class="event-log-tabs-bar">
                     <span class="event-log-tab active" data-tab="events" onclick="switchLogTab('events')">EVENT LOG</span>
                     <span class="event-log-tab" data-tab="loot" onclick="switchLogTab('loot')">LOOT</span>
+                    <span class="event-log-tab" data-tab="chat" onclick="switchLogTab('chat')">
+                      CHAT
+                      <span class="chat-unread-dot" id="chatUnreadDot"></span>
+                    </span>
                     <button class="event-log-export-btn" id="export-log-btn" onclick="exportEventLog(event)" title="Export event log">EXPORT</button>
                 </div>
                 <div class="event-log-body" id="event-log-body">
@@ -104,6 +103,14 @@
                 </div>
                 <div class="event-log-body" id="loot-log-body" style="display:none">
                     <div class="event-log-empty">no loot yet&hellip; Download something from a beacon</div>
+                </div>
+                <div class="event-log-body" id="chat-log-body" style="display:none">
+                    <div class="chat-messages" id="chat-messages"></div>
+                    <form class="chat-input-form" id="chat-form">
+                        <input type="text" id="chat-input" maxlength="2000" autocomplete="off"
+                               placeholder="message..." />
+                        <button type="submit">send</button>
+                    </form>
                 </div>
             </div>
         </div>
@@ -124,12 +131,36 @@
         </div>
     </div>
 
+    <!-- Session OPSEC Modal -->
+    <div id="session-modal" class="modal-overlay" style="display:none" onclick="cancelSession()">
+        <div class="modal" onclick="event.stopPropagation()" style="border-color: rgba(200,75,49,0.4)">
+            <p class="modal-title" style="color:#c84b31">OPSEC WARNING</p>
+            <p class="modal-body">
+                Upgrading <strong id="session-modal-target"></strong> to <strong>session mode</strong> opens a persistent TCP connection for real-time C2.
+                This is detectable:
+            </p>
+            <ul class="modal-body" style="text-align:left;margin:8px auto;max-width:340px;color:#aaa;line-height:1.8">
+                <li>Visible in <strong>netstat</strong> as ESTABLISHED</li>
+                <li>Detectable by <strong>EDR network monitoring</strong></li>
+                <li>Persistent connection (not polling)</li>
+                <li>Traceable if connection drops mid-op</li>
+            </ul>
+            <p class="modal-body" style="color:#888">HTTP beacon polling is stealthier. Use session mode when you need real-time response.</p>
+            <div class="modal-actions">
+                <button class="modal-btn-cancel" onclick="cancelSession()">abort</button>
+                <button id="session-modal-confirm" class="modal-btn-confirm" style="background:rgba(200,75,49,0.15);color:#c84b31;border-color:rgba(200,75,49,0.4)" onclick="confirmSession()">ACCEPT RISK</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast container -->
     <div id="toast-container"></div>
 
     <!-- Context Menu -->
     <div id="context-menu" class="context-menu" style="display:none">
         <div class="context-item" id="ctx-interact">Interact</div>
+        <div class="context-item" id="ctx-session">Session Mode</div>
+        <div class="context-separator"></div>
         <div class="context-item ctx-danger" id="ctx-kill">Kill Beacon</div>
     </div>
 

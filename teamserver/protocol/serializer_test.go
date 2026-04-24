@@ -161,3 +161,46 @@ func TestEncodeSetSleepReq(t *testing.T) {
 		t.Fatal("jitter mismatch")
 	}
 }
+
+func TestEncodeDecodeInteractiveReq(t *testing.T) {
+	host := "10.0.0.1"
+	port := uint16(4443)
+	encoded := EncodeInteractiveReq(host, port)
+
+	gotHost, gotPort, err := DecodeInteractiveReq(encoded)
+	if err != nil {
+		t.Fatalf("DecodeInteractiveReq: %v", err)
+	}
+	if gotHost != host {
+		t.Errorf("host = %q, want %q", gotHost, host)
+	}
+	if gotPort != port {
+		t.Errorf("port = %d, want %d", gotPort, port)
+	}
+}
+
+func TestDecodeInteractiveReqTruncated(t *testing.T) {
+	_, _, err := DecodeInteractiveReq([]byte{0x01, 0x00})
+	if err == nil {
+		t.Fatal("expected error for truncated input")
+	}
+}
+
+func TestEncodeDecodeShellInput(t *testing.T) {
+	input := []byte("whoami\r\n")
+	encoded := EncodeShellInput(input)
+	got, err := DecodeShellInput(encoded)
+	if err != nil {
+		t.Fatalf("DecodeShellInput: %v", err)
+	}
+	if !bytes.Equal(got, input) {
+		t.Errorf("got %q, want %q", got, input)
+	}
+}
+
+func TestDecodeShellInputTruncated(t *testing.T) {
+	_, err := DecodeShellInput([]byte{0xFF, 0x00, 0x00, 0x00})
+	if err == nil {
+		t.Fatal("expected error for truncated input")
+	}
+}

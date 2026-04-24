@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	Current = "1.1.0"
+	Current = "1.3.0"
 	repo    = "https://api.github.com/repos/Gusbtc/Bepop-Framework/releases/latest"
 )
 

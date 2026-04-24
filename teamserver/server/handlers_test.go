@@ -34,11 +34,20 @@ type nopPersister struct{}
 
 func (n *nopPersister) SaveListeners(_ []*models.Listener)              {}
 func (n *nopPersister) SaveBeacons(_ []*models.Beacon)                  {}
-func (n *nopPersister) SaveResults(_ map[uint32][]*models.Result)       {}
 func (n *nopPersister) SaveEvents(_ []*models.Event)                    {}
 func (n *nopPersister) SaveTerminals(_ map[uint32]*models.TerminalState) {}
 func (n *nopPersister) SaveLoot(_ []*models.ExfilEntry)                  {}
 func (n *nopPersister) SaveRSAKey(_ *rsa.PrivateKey)                     {}
+
+func newTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	s, err := store.New(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
 
 func setup(t *testing.T) (*Handler, *store.Store, *rsa.PrivateKey) {
 	t.Helper()
@@ -46,8 +55,8 @@ func setup(t *testing.T) (*Handler, *store.Store, *rsa.PrivateKey) {
 	if err != nil {
 		t.Fatalf("RSA keygen: %v", err)
 	}
-	s := store.New()
-	return NewHandler(s, priv, "", &noopLM{}, &nopPersister{}, 0), s, priv
+	s := newTestStore(t)
+	return NewHandler(s, priv, "", &noopLM{}, &nopPersister{}, 0, nil, NewHub(), nil, nil, nil), s, priv
 }
 
 func setupTestHandler(t *testing.T) (*Handler, *models.Beacon, *rsa.PrivateKey) {
@@ -56,8 +65,8 @@ func setupTestHandler(t *testing.T) (*Handler, *models.Beacon, *rsa.PrivateKey) 
 	if err != nil {
 		t.Fatalf("RSA keygen: %v", err)
 	}
-	s := store.New()
-	h := NewHandler(s, priv, "", &noopLM{}, &nopPersister{}, 0)
+	s := newTestStore(t)
+	h := NewHandler(s, priv, "", &noopLM{}, &nopPersister{}, 0, nil, NewHub(), nil, nil, nil)
 	sessionKey := make([]byte, 32)
 	rand.Read(sessionKey)
 	s.RegisterBeacon(&models.ImplantMetadata{ID: 1, SessionKey: sessionKey, Sleep: 5, Hostname: "test-host"})
@@ -71,7 +80,7 @@ func newTestHandler(t *testing.T) *Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewHandler(store.New(), key, "", &noopLM{}, &nopPersister{}, 0)
+	return NewHandler(newTestStore(t), key, "", &noopLM{}, &nopPersister{}, 0, nil, NewHub(), nil, nil, nil)
 }
 
 func TestHandleGetPubKey(t *testing.T) {
@@ -789,5 +798,34 @@ func TestHandleBuild_NoBeaconSrc(t *testing.T) {
 	h.HandleBuild(w, req)
 	if w.Code != 501 {
 		t.Fatalf("expected 501 (no beacon src), got %d", w.Code)
+	}
+}
+
+func TestChatRateLimitAllowsBurst(t *testing.T) {
+	h := &Handler{}
+	for i := 0; i < 10; i++ {
+		if !h.chatRateLimit("alice") {
+			t.Fatalf("message %d should be allowed", i)
+		}
+	}
+}
+
+func TestChatRateLimitRejectsOverBurst(t *testing.T) {
+	h := &Handler{}
+	for i := 0; i < 10; i++ {
+		_ = h.chatRateLimit("alice")
+	}
+	if h.chatRateLimit("alice") {
+		t.Fatal("11th message should have been rejected")
+	}
+}
+
+func TestChatRateLimitPerOperatorIsolated(t *testing.T) {
+	h := &Handler{}
+	for i := 0; i < 10; i++ {
+		_ = h.chatRateLimit("alice")
+	}
+	if !h.chatRateLimit("bob") {
+		t.Fatal("bob's first message should be allowed")
 	}
 }

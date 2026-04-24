@@ -108,25 +108,9 @@ func TestSaveAndLoadBeacons(t *testing.T) {
 }
 
 func TestSaveAndLoadResults(t *testing.T) {
-	p := newP(t)
-	p.SaveRSAKey(genKey(t))
-
-	now := time.Now().Truncate(time.Second)
-	rs := map[uint32][]*models.Result{
-		99: {{Label: 1, BeaconID: 99, Output: "hello", ReceivedAt: now}},
-	}
-	p.SaveResults(rs)
-
-	sess, err := p.Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if len(sess.Results[99]) != 1 {
-		t.Fatalf("expected 1 result for beacon 99")
-	}
-	if sess.Results[99][0].Output != "hello" {
-		t.Errorf("output not preserved: %q", sess.Results[99][0].Output)
-	}
+	// SaveResults was removed from persist; results are now stored in SQLite via the store layer.
+	// This test is intentionally a no-op to keep the file compiling.
+	_ = newP(t)
 }
 
 func TestSaveAndLoadRSAKey(t *testing.T) {

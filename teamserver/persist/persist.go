@@ -38,10 +38,9 @@ type Meta struct {
 
 // Session holds all persisted state loaded at startup.
 type Session struct {
-	Listeners []*models.Listener
-	Beacons   []*models.Beacon
-	Results   map[uint32][]*models.Result
-	Events    []*models.Event
+	Listeners  []*models.Listener
+	Beacons    []*models.Beacon
+	Events     []*models.Event
 	Terminals  map[uint32]*models.TerminalState
 	ExfilFiles []*models.ExfilEntry
 	PrivKey    *rsa.PrivateKey
@@ -121,7 +120,7 @@ func (p *Persister) readMetaLocked() (Meta, error) {
 // Load reads all four state files and returns a Session.
 // rsa.pem is required; missing JSON files are treated as empty.
 func (p *Persister) Load() (*Session, error) {
-	sess := &Session{Results: make(map[uint32][]*models.Result)}
+	sess := &Session{}
 
 	if data, err := os.ReadFile(filepath.Join(p.dir, "listeners.json")); err == nil {
 		if err := json.Unmarshal(data, &sess.Listeners); err != nil {
@@ -132,21 +131,6 @@ func (p *Persister) Load() (*Session, error) {
 	if data, err := os.ReadFile(filepath.Join(p.dir, "beacons.json")); err == nil {
 		if err := json.Unmarshal(data, &sess.Beacons); err != nil {
 			return nil, fmt.Errorf("parse beacons.json: %w", err)
-		}
-	}
-
-	if data, err := os.ReadFile(filepath.Join(p.dir, "results.json")); err == nil {
-		// JSON only allows string keys; beacon IDs are stored as decimal strings.
-		var raw map[string][]*models.Result
-		if err := json.Unmarshal(data, &raw); err != nil {
-			return nil, fmt.Errorf("parse results.json: %w", err)
-		}
-		for k, v := range raw {
-			var id uint32
-			if n, _ := fmt.Sscanf(k, "%d", &id); n != 1 {
-				return nil, fmt.Errorf("results.json: invalid beacon ID key %q", k)
-			}
-			sess.Results[id] = v
 		}
 	}
 
@@ -216,7 +200,7 @@ func (p *Persister) SaveListeners(ls []*models.Listener) {
 			ui.Errorf("persist", "listeners: %v", err)
 			return
 		}
-		p.saveMetaLocked(len(ls), -1, -1, -1, -1)
+		p.saveMetaLocked(len(ls), -1, -1, -1)
 	})
 }
 
@@ -229,26 +213,7 @@ func (p *Persister) SaveBeacons(bs []*models.Beacon) {
 			ui.Errorf("persist", "beacons: %v", err)
 			return
 		}
-		p.saveMetaLocked(-1, len(bs), -1, -1, -1)
-	})
-}
-
-// SaveResults writes results.json then updates meta.json.
-func (p *Persister) SaveResults(rs map[uint32][]*models.Result) {
-	p.enqueue(func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		str := make(map[string][]*models.Result, len(rs))
-		total := 0
-		for k, v := range rs {
-			str[fmt.Sprintf("%d", k)] = v
-			total += len(v)
-		}
-		if err := p.writeJSON("results.json", str, 0600); err != nil {
-			ui.Errorf("persist", "results: %v", err)
-			return
-		}
-		p.saveMetaLocked(-1, -1, total, -1, -1)
+		p.saveMetaLocked(-1, len(bs), -1, -1)
 	})
 }
 
@@ -265,7 +230,7 @@ func (p *Persister) SaveTerminals(ts map[uint32]*models.TerminalState) {
 			ui.Errorf("persist", "terminals: %v", err)
 			return
 		}
-		p.saveMetaLocked(-1, -1, -1, -1, len(ts))
+		p.saveMetaLocked(-1, -1, -1, len(ts))
 	})
 }
 
@@ -278,7 +243,7 @@ func (p *Persister) SaveLoot(files []*models.ExfilEntry) {
 			ui.Errorf("persist", "loot: %v", err)
 			return
 		}
-		p.saveMetaLocked(-1, -1, -1, len(files), -1)
+		p.saveMetaLocked(-1, -1, len(files), -1)
 	})
 }
 
@@ -307,16 +272,13 @@ func (p *Persister) SaveRSAKey(key *rsa.PrivateKey) {
 }
 
 // saveMetaLocked updates meta.json. Caller must hold p.mu.
-func (p *Persister) saveMetaLocked(listeners, beacons, results, loot, terminals int) {
+func (p *Persister) saveMetaLocked(listeners, beacons, loot, terminals int) {
 	cur, _ := p.readMetaLocked()
 	if listeners >= 0 {
 		cur.Listeners = listeners
 	}
 	if beacons >= 0 {
 		cur.Beacons = beacons
-	}
-	if results >= 0 {
-		cur.Results = results
 	}
 	if loot >= 0 {
 		cur.Loot = loot
