@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
@@ -73,6 +74,9 @@ func main() {
 	mux.HandleFunc("GET /listeners", servePage("static/pages/listeners.html"))
 	mux.HandleFunc("GET /build", servePage("static/pages/build.html"))
 	mux.HandleFunc("GET /login", servePage("static/pages/login.html"))
+
+	mime.AddExtensionType(".woff2", "font/woff2")
+	mime.AddExtensionType(".woff", "font/woff")
 
 	staticFS, err := fs.Sub(assets, "static")
 	if err != nil {

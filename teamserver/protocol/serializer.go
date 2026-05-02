@@ -181,3 +181,34 @@ func DecodeShellInput(b []byte) ([]byte, error) {
 	}
 	return b[4 : 4+n], nil
 }
+
+// EncodeExecAssemblyReq serializes an EXEC-ASSEMBLY-REQ:
+// [4B shellcode_len][shellcode][4B spawnto_len][spawnto UTF-8]
+func EncodeExecAssemblyReq(shellcode []byte, spawnto string) []byte {
+	b := make([]byte, 4+len(shellcode)+4+len(spawnto))
+	binary.LittleEndian.PutUint32(b[:4], uint32(len(shellcode)))
+	copy(b[4:], shellcode)
+	off := 4 + len(shellcode)
+	binary.LittleEndian.PutUint32(b[off:], uint32(len(spawnto)))
+	copy(b[off+4:], spawnto)
+	return b
+}
+
+// DecodeExecAssemblyReq deserializes an EXEC-ASSEMBLY-REQ.
+func DecodeExecAssemblyReq(b []byte) (shellcode []byte, spawnto string, err error) {
+	if len(b) < 8 {
+		return nil, "", fmt.Errorf("DecodeExecAssemblyReq: need at least 8 bytes, got %d", len(b))
+	}
+	scLen := binary.LittleEndian.Uint32(b[:4])
+	if uint32(len(b)) < 4+scLen+4 {
+		return nil, "", fmt.Errorf("DecodeExecAssemblyReq: truncated shellcode")
+	}
+	shellcode = b[4 : 4+scLen]
+	off := 4 + scLen
+	spawntoLen := binary.LittleEndian.Uint32(b[off:])
+	if uint32(len(b)) < off+4+spawntoLen {
+		return nil, "", fmt.Errorf("DecodeExecAssemblyReq: truncated spawnto")
+	}
+	spawnto = string(b[off+4 : off+4+spawntoLen])
+	return shellcode, spawnto, nil
+}

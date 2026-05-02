@@ -141,6 +141,9 @@ func buildSessionList(s *store.Store, h *Handler) interface{} {
 		ListenerName string `json:"listener_name"`
 		Mode         string `json:"mode"`
 		ShellActive  bool   `json:"shell_active"`
+		SocksActive  bool   `json:"socks_active"`
+		SocksHost    string `json:"socks_host,omitempty"`
+		SocksPort    int    `json:"socks_port,omitempty"`
 	}
 	resp := make([]item, len(beacons))
 	for i, b := range beacons {
@@ -171,6 +174,19 @@ func buildSessionList(s *store.Store, h *Handler) interface{} {
 				return "beacon"
 			}(),
 			ShellActive: s.IsShell(b.ID),
+			SocksActive: s.HasSocksProxy(b.ID),
+			SocksHost: func() string {
+				if p := s.GetSocksProxy(b.ID); p != nil {
+					return p.Host
+				}
+				return ""
+			}(),
+			SocksPort: func() int {
+				if p := s.GetSocksProxy(b.ID); p != nil {
+					return p.Port
+				}
+				return 0
+			}(),
 		}
 	}
 	return resp

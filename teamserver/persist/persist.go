@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -183,8 +184,13 @@ func (p *Persister) Reset() error {
 	if err != nil {
 		return err
 	}
+	cleanDir := filepath.Clean(p.dir)
 	for _, e := range entries {
-		if err := os.Remove(filepath.Join(p.dir, e.Name())); err != nil {
+		path := filepath.Clean(filepath.Join(p.dir, e.Name()))
+		if !strings.HasPrefix(path, cleanDir+string(filepath.Separator)) {
+			continue
+		}
+		if err := os.RemoveAll(path); err != nil {
 			return err
 		}
 	}

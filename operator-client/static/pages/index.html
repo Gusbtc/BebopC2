@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Sessions</title>
     <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+    <link rel="stylesheet" href="/static/css/xterm.css">
 </head>
 <body>
     <header>
@@ -83,6 +83,12 @@
                     </div>
                 </div>
                 <div id="terminal"></div>
+                <div id="file-browser" style="display:none">
+                    <div class="fb-tree-container" id="fb-tree"></div>
+                    <div class="fb-detail-bar" id="fb-detail-bar">
+                        <span class="fb-detail-text" id="fb-detail-text">Select an item to view details</span>
+                    </div>
+                </div>
                 <div id="terminal-placeholder" class="terminal-placeholder">
                     <span>select a beacon to interact</span>
                 </div>
@@ -160,12 +166,34 @@
     <div id="context-menu" class="context-menu" style="display:none">
         <div class="context-item" id="ctx-interact">Interact</div>
         <div class="context-item" id="ctx-session">Session Mode</div>
+        <div class="context-item" id="ctx-filebrowser">File Browser</div>
         <div class="context-separator"></div>
         <div class="context-item ctx-danger" id="ctx-kill">Kill Beacon</div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
-    <script src="/static/js/app.js"></script>
+    <div id="fb-context-menu" class="context-menu" style="display:none"></div>
+
+    <!-- File Browser Delete Modal -->
+    <div id="fb-delete-modal" class="modal-overlay" style="display:none" onclick="cancelFbDelete()">
+        <div class="modal" onclick="event.stopPropagation()" style="border-color: rgba(200,75,49,0.4)">
+            <p class="modal-title" style="color:#c84b31">Delete</p>
+            <p class="modal-body">
+                <strong id="fb-delete-target"></strong><br>
+                This cannot be undone.
+            </p>
+            <div class="modal-actions">
+                <button class="modal-btn-cancel" onclick="cancelFbDelete()">abort</button>
+                <button class="modal-btn-confirm" style="background:rgba(200,75,49,0.15);color:#c84b31;border-color:rgba(200,75,49,0.4)" onclick="confirmFbDelete()">DELETE</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/xterm.js"></script>
+    <script src="/static/js/addon-fit.js"></script>
+    <script src="/static/js/app/core.js"></script>
+    <script src="/static/js/app/views.js"></script>
+    <script src="/static/js/app/terminal.js"></script>
+    <script src="/static/js/app/filebrowser.js"></script>
+    <script src="/static/js/app/websocket.js"></script>
 </body>
 </html>

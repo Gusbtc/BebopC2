@@ -58,11 +58,18 @@
                 </div>
                 <div class="form-row">
                     <label for="buildJitter">Jitter (%)</label>
-                    <input id="buildJitter" type="number" min="0" max="100" placeholder="20" value="20">
+                    <input id="buildJitter" type="number" min="0" max="100" placeholder="0" value="0">
+                </div>
+                <div class="form-row">
+                    <label for="buildPlatform">Platform</label>
+                    <select id="buildPlatform" onchange="onPlatformChange()">
+                        <option value="windows">Windows</option>
+                        <option value="linux">Linux</option>
+                    </select>
                 </div>
                 <div class="form-row">
                     <label for="buildFormat">Output Format</label>
-                    <select id="buildFormat" onchange="document.getElementById('build-btn').textContent='Compile beacon.'+this.value">
+                    <select id="buildFormat" onchange="updateBuildBtn()">
                         <option value="exe">Windows Executable (.exe)</option>
                         <option value="bin">Raw Shellcode (.bin)</option>
                     </select>
@@ -74,6 +81,10 @@
             </div>
         </div>
     </main>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app/core.js"></script>
+    <script src="/static/js/app/views.js"></script>
+    <script src="/static/js/app/terminal.js"></script>
+    <script src="/static/js/app/filebrowser.js"></script>
+    <script src="/static/js/app/websocket.js"></script>
 </body>
 </html>

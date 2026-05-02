@@ -108,6 +108,7 @@ var functions = []fnEntry{
 	{"ReadFile", "Kernel32"},
 	{"WriteFile", "Kernel32"},
 	{"CreateFileA", "Kernel32"},
+	{"CreateFileW", "Kernel32"},
 	{"GetModuleFileNameA", "Kernel32"},
 	{"GetNativeSystemInfo", "Kernel32"},
 	{"MultiByteToWideChar", "Kernel32"},
@@ -127,6 +128,8 @@ var functions = []fnEntry{
 	{"GetCurrentProcessId", "Kernel32"},
 	{"FindFirstFileA", "Kernel32"},
 	{"FindNextFileA", "Kernel32"},
+	{"FindFirstFileW", "Kernel32"},
+	{"FindNextFileW", "Kernel32"},
 	{"FindClose", "Kernel32"},
 	{"GetFileAttributesExA", "Kernel32"},
 	{"FileTimeToSystemTime", "Kernel32"},
@@ -180,6 +183,11 @@ var functions = []fnEntry{
 	{"HeapAlloc", "Kernel32"},
 	{"GetProcessHeap", "Kernel32"},
 	{"HeapFree", "Kernel32"},
+	// Kernel32 — process injection (execute-assembly)
+	{"VirtualAllocEx", "Kernel32"},
+	{"WriteProcessMemory", "Kernel32"},
+	{"VirtualProtectEx", "Kernel32"},
+	{"CreateRemoteThread", "Kernel32"},
 }
 
 func Generate(outDir string) error {

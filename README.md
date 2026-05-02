@@ -3,15 +3,16 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.3-amber?style=for-the-badge&labelColor=black" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.4-amber?style=for-the-badge&labelColor=black" alt="Version">
   <img src="https://img.shields.io/badge/Win32-blue?style=for-the-badge&logo=c&labelColor=black" alt="Win32">
+  <img src="https://img.shields.io/badge/Linux-ELF-orange?style=for-the-badge&logo=linux&labelColor=black" alt="Linux">
   <img src="https://img.shields.io/badge/Golang-Teamserver-00ADD8?style=for-the-badge&logo=go&labelColor=black" alt="Go">
   <img src="https://img.shields.io/badge/License-MIT-red?style=for-the-badge&labelColor=black" alt="License">
 </p>
 
 ---
 
-Asynchronous C2 framework for red team operations. Go teamserver, C beacon for Windows, browser-based operator console.
+Asynchronous C2 framework for red team operations. Go teamserver, C beacons for Windows and Linux, browser-based operator console.
 
 <p align="center">
   <img src="operator-client/static/img/graph_sessions.png" alt="Session graph view" width="900">
@@ -21,7 +22,7 @@ Asynchronous C2 framework for red team operations. Go teamserver, C beacon for W
   <img src="operator-client/static/img/table_sessions.png" alt="Session table view" width="900">
 </p>
 
-The beacon is native Win32 with no CRT API dependencies in the IAT. All Windows APIs are resolved at runtime through PEB walking and DJB2 hashing. Communication is binary-over-HTTP with AES-256-CBC + HMAC-SHA256 using derived sub-keys (HKDF). The operator console gives you terminals, session maps, and an event log from any browser.
+The Windows beacon is native Win32 with no CRT API dependencies in the IAT. All Windows APIs are resolved at runtime through PEB walking and DJB2 hashing. The Linux beacon is a statically-linked ELF using mbedTLS for crypto. Communication is binary-over-HTTP with AES-256-CBC + HMAC-SHA256 using derived sub-keys (HKDF). The operator console gives you terminals, file browsers, session maps, and an event log from any browser.
 
 ## How it works
 
@@ -31,11 +32,11 @@ The beacon is native Win32 with no CRT API dependencies in the IAT. All Windows 
   │                                 │           │                         │
   │  ┌──────────┐   ┌────────────┐ │  HTTP/S   │  ┌─────────┐           │
   │  │ Operator │──>│ Teamserver │─┼──── // ────┼─>│ Beacon  │──[WinAPI] │
-  │  │ Browser  │   └──────┬─────┘ │           │  └─────────┘           │
-  │  └──────────┘          │       │           │                         │
-  │                   ┌────┴─────┐ │           │                         │
+  │  │ Browser  │   └──────┬─────┘ │   TCP     │  ├─────────┤           │
+  │  └──────────┘          │       │──── // ────┼─>│ Beacon  │──[Linux]  │
+  │                   ┌────┴─────┐ │           │  └─────────┘           │
   │                   │ Builder  │ │           │                         │
-  │                   │ (MinGW)  │ │           │                         │
+  │                   │MinGW/musl│ │           │                         │
   │                   └──────────┘ │           │                         │
   └─────────────────────────────────┘           └─────────────────────────┘
 
@@ -49,39 +50,54 @@ The beacon is native Win32 with no CRT API dependencies in the IAT. All Windows 
 
 ### Teamserver (Go)
 
-Single binary, no external dependencies. Manages beacon state, queues tasks, serves the operator UI, and cross-compiles beacons on the fly via MinGW.
+Single binary, no external dependencies. Manages beacon state, queues tasks, serves the operator UI, and cross-compiles beacons on the fly via MinGW (Windows) or musl-gcc (Linux).
 
 - Asynchronous task queue per beacon
 - SQLite persistent store with session restore on startup (load previous session or reset)
 - Multi-operator authentication (bcrypt + JWT) with token revocation
 - Real-time operator chat via WebSocket (rate-limited, persisted in SQLite)
 - Interactive session mode — persistent TCP connections for low-latency commands
-- SOCKS5 proxy pivoting through beacon (auto-assigned ports 1080–1099)
+- SOCKS5 proxy pivoting through beacon (auto-assigned ports 1080-1099)
 - WebSocket hub for real-time event broadcasting to all connected operators
 - RSA keypair generated at startup, kept in memory
 - Multiple listeners on different ports and protocols
 - On-demand beacon compilation with per-build string obfuscation
 - HKDF domain separation for AES and HMAC sub-keys
+- Execute-assembly pipeline with Donut shellcode and sacrificial process
 
-### Beacon (C / Win32)
+### Beacon — Windows (C / Win32)
 
 Lightweight implant for Windows x64. Communicates over WinHTTP, uses Windows CNG for crypto.
 
 - All Windows APIs resolved via PEB walk + DJB2 hash (zero suspicious IAT entries)
 - Anonymous pipes capture output from spawned processes
-- Native command implementations (ls, ps, whoami, netstat, ipconfig, arp, drives, services, privs, env, clipboard, reg_query, reg_set, runas) via WinAPI, no `cmd.exe` unless explicitly requested
+- 20+ native commands (ls, ps, whoami, netstat, ipconfig, arp, drives, services, privs, env, clipboard, reg_query, reg_set, runas) via WinAPI, no `cmd.exe` unless explicitly requested
+- Execute-assembly: in-memory .NET execution via Donut shellcode + sacrificial MSBuild.exe process
 - Interactive session mode — upgrades to persistent TCP for real-time shell I/O
 - SOCKS5 relay with channel-based bidirectional tunneling (up to 64 concurrent channels)
 - Integrity-level detection (Medium / High / SYSTEM) reported on registration
 - File transfer with chunked 64KB streaming (upload and download)
 
+### Beacon — Linux (C / ELF)
+
+Statically-linked ELF implant. Uses mbedTLS for crypto, no external dependencies at runtime.
+
+- 24 native builtins (ls, ps, cat, chmod, curl, portscan, ssh, triagedirectory, and more)
+- AES-256-CBC + HMAC-SHA256 via mbedTLS with constant-time HMAC verification
+- Interactive session mode with persistent TCP connection
+- SOCKS5 proxy relay with multi-channel tunneling
+- File transfer with chunked 64KB streaming (upload and download)
+- XOR string obfuscation (same pipeline as Windows, fresh key per build)
+- Supports x86_64 and aarch64 targets
+
 ### Operator console (web)
 
-Browser-based UI with a terminal-centric workflow. Vanilla HTML/CSS/JS served by the operator-client binary. No build step.
+Browser-based UI with a terminal-centric workflow. Modular vanilla JS served by the operator-client binary. No build step.
 
 - JWT-authenticated login page
 - Tabbed terminals with persistent command history and output across tab switches
-- Event log with timestamped entries (new sessions, kills, task dispatches, connection changes)
+- File browser with tree view, context menu operations (cat, download, upload, mkdir, delete, copy path)
+- Event log with operator-attributed timestamped entries
 - Real-time operator chat panel via WebSocket
 - Session map as a force-directed graph with zoom/pan, plus table view
 - Right-click context menus and double-click to interact with beacons, sessions, and listeners
@@ -98,7 +114,7 @@ Windows API functions are resolved at runtime through DJB2 hashing and PEB walki
 
 ### String obfuscation
 
-All hardcoded strings (API paths, hostnames, command names, User-Agent, DLL names) are encrypted with an 8-byte rotating XOR key at compile time. Decrypted in memory just before use. The obfuscation generator runs as part of the build pipeline so each compiled beacon gets a fresh key.
+All hardcoded strings (API paths, hostnames, command names, User-Agent, DLL names) are encrypted with an 8-byte rotating XOR key at compile time. Decrypted in memory just before use. The obfuscation generator runs as part of the build pipeline so each compiled beacon gets a fresh key. Applied to both Windows and Linux beacons.
 
 DLL names passed to LoadLibraryA (winhttp.dll, bcrypt.dll, advapi32.dll, etc.) are also XOR-encrypted and decrypted on the stack at runtime. No DLL names appear as plaintext in the binary.
 
@@ -147,7 +163,7 @@ chmod +x setup-operator.sh
 ./setup-operator.sh
 ```
 
-The beacon is compiled on demand from the operator console's Build page. It handles listener selection, sleep interval, jitter, and output format (EXE or shellcode). No manual beacon build needed.
+The beacon is compiled on demand from the operator console's Build page. Select the platform (Windows or Linux), listener, sleep interval, jitter, and output format (EXE, shellcode, or ELF). No manual beacon build needed.
 
 ## Project layout
 
@@ -165,11 +181,11 @@ teamserver/
   protocol/            Binary serialization + crypto (HKDF key derivation)
   obfgen/              Build-time XOR string obfuscation
   hashgen/             DJB2 API hash generator
-  builder/             Cross-compilation pipeline
+  builder/             Cross-compilation pipeline (MinGW + musl-gcc)
   persist/             JSON state persistence (listeners, beacons, loot)
   ui/                  Terminal UI helpers
 
-beacon/
+beacon/                Windows x64 implant (Win32 / CNG)
   src/
     main.c             Entry point, checkin loop
     comms/
@@ -178,16 +194,30 @@ beacon/
       shell.c          Interactive shell over TCP
       socks.c          SOCKS5 relay channels
     protocol/          AES-CBC + HMAC-SHA256 via CNG, HKDF sub-keys
-    exec/              Process execution (exec.c) + native commands (builtin.c)
+    exec/              Process execution + native commands + execute-assembly
     resolve/           PEB walking + DJB2 hash resolution (~100 APIs)
     transfer/          File upload/download with 64KB chunked streaming
   include/             Headers, config, generated hash tables, XOR strings
 
+beacon-linux/          Linux ELF implant (mbedTLS)
+  src/
+    main.c             Entry point, checkin loop
+    comms/
+      http.c           HTTP communication
+      session.c        Persistent TCP session mode
+      socks.c          SOCKS5 relay channels
+    protocol/          AES-CBC + HMAC-SHA256 via mbedTLS
+    exec/              Native builtins (24 commands)
+    transfer/          File upload/download with 64KB chunked streaming
+    util/              XOR string decryption
+  include/             Headers, config, generated XOR strings
+
 operator-client/
   static/
     pages/             HTML (sessions, listeners, build, login)
-    css/               Stylesheet
-    js/                Application logic (xterm.js terminal)
+    css/               Stylesheets
+    js/app/            Modular JS (core, views, terminal, filebrowser, websocket)
+    js/                xterm.js terminal emulator
     img/               Assets
 ```
 
@@ -210,6 +240,10 @@ operator-client/
 - [x] Real-time operator chat via WebSocket
 - [x] WebSocket-based operator communication for live UI updates
 - [x] Operator management CLI (add, delete, list)
+- [x] Linux beacon (ELF, mbedTLS, 24 native builtins, session mode, SOCKS5)
+- [x] Execute-assembly for .NET tooling (Donut + sacrificial MSBuild.exe)
+- [x] File browser with tree view and context menu operations
+- [x] Operator-attributed event logging
 
 ### Next
 - [ ] Ekko sleep masking (RC4 image encryption, VirtualProtect RW/RX toggle)
@@ -219,13 +253,11 @@ operator-client/
 - [ ] Beacon staging (minimal stager that downloads full beacon)
 
 ### Later
-- [ ] execute-assembly for .NET tooling
 - [ ] ETW patching (EtwEventWrite in-memory patch)
 - [ ] AMSI bypass (AmsiScanBuffer patch)
 - [ ] DNS and SMB transport channels
 - [ ] Token manipulation for lateral movement
 - [ ] Screenshot and keylogger tasking
-- [ ] Linux beacon
 
 ---
 

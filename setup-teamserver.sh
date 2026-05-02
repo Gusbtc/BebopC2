@@ -37,6 +37,18 @@ install_if_missing x86_64-w64-mingw32-gcc mingw-w64
 install_if_missing nasm nasm
 install_if_missing cmake cmake
 
+if python3 -c "import donut" &>/dev/null; then
+    echo -e "  ${GREEN}[ok]${RESET} python3-donut"
+else
+    echo -e "  ${RED}[!!]${RESET} python3-donut not found — installing..."
+    sudo apt install -y python3-donut >/dev/null 2>&1
+    if python3 -c "import donut" &>/dev/null; then
+        echo -e "  ${GREEN}[ok]${RESET} python3-donut installed"
+    else
+        echo -e "  ${RED}[!!]${RESET} failed to install python3-donut. execute-assembly will not work."
+    fi
+fi
+
 echo ""
 echo -e "${AMBER}resolving go modules...${RESET}"
 cd teamserver

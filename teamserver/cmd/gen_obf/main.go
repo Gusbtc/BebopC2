@@ -14,7 +14,7 @@ func main() {
 	out  := flag.String("out", "../beacon/include", "output directory for obf_strings.h")
 	flag.Parse()
 
-	if err := obfgen.Generate(*host, filepath.Clean(*out)); err != nil {
+	if err := obfgen.Generate(*host, filepath.Clean(*out), "windows"); err != nil {
 		log.Fatalf("gen_obf: %v", err)
 	}
 	log.Printf("wrote obf_strings.h to %s (host=%s)", filepath.Clean(*out), *host)

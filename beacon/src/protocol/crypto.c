@@ -19,7 +19,9 @@ static int derive_key(const uint8_t *master, const char *label,
     BCRYPT_HASH_HANDLE hHash = NULL;
     int ret = -1;
 
-    if (!BCRYPT_SUCCESS(fnBCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM,
+    wchar_t _sha[ENC_BCRYPT_SHA256_LEN + 1];
+    xor_dec_w(_sha, ENC_BCRYPT_SHA256, ENC_BCRYPT_SHA256_LEN);
+    if (!BCRYPT_SUCCESS(fnBCryptOpenAlgorithmProvider(&hAlg, _sha,
             NULL, BCRYPT_ALG_HANDLE_HMAC_FLAG)))
         goto done;
     if (!BCRYPT_SUCCESS(fnBCryptCreateHash(hAlg, &hHash, NULL, 0,
@@ -45,6 +47,16 @@ int aes_encrypt(const uint8_t *key, const uint8_t *plain, DWORD plain_len,
     uint8_t *ct = NULL;
     int ret = -1;
 
+    /* Decode BCrypt algorithm names */
+    wchar_t _sha[ENC_BCRYPT_SHA256_LEN + 1];
+    xor_dec_w(_sha, ENC_BCRYPT_SHA256, ENC_BCRYPT_SHA256_LEN);
+    wchar_t _aes[ENC_BCRYPT_AES_LEN + 1];
+    xor_dec_w(_aes, ENC_BCRYPT_AES, ENC_BCRYPT_AES_LEN);
+    wchar_t _cm[ENC_BCRYPT_CHAIN_MODE_LEN + 1];
+    xor_dec_w(_cm, ENC_BCRYPT_CHAIN_MODE, ENC_BCRYPT_CHAIN_MODE_LEN);
+    wchar_t _cbc[ENC_BCRYPT_CHAIN_MODE_VAL_LEN + 1];
+    xor_dec_w(_cbc, ENC_BCRYPT_CHAIN_MODE_VAL, ENC_BCRYPT_CHAIN_MODE_VAL_LEN);
+
     /* Derive separate sub-keys for AES and HMAC */
     uint8_t aes_key[32], hmac_key[32];
     char lbl_aes[ENC_CRYPTO_AES_CBC_LEN + 1];
@@ -60,10 +72,10 @@ int aes_encrypt(const uint8_t *key, const uint8_t *plain, DWORD plain_len,
         goto cleanup;
 
     /* 2. Open AES-CBC */
-    if (!BCRYPT_SUCCESS(fnBCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0)))
+    if (!BCRYPT_SUCCESS(fnBCryptOpenAlgorithmProvider(&hAlg, _aes, NULL, 0)))
         goto cleanup;
-    if (!BCRYPT_SUCCESS(fnBCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE,
-            (PUCHAR)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0)))
+    if (!BCRYPT_SUCCESS(fnBCryptSetProperty(hAlg, _cm,
+            (PUCHAR)_cbc, (ULONG)(wcslen(_cbc) + 1) * sizeof(wchar_t), 0)))
         goto cleanup;
     if (!BCRYPT_SUCCESS(fnBCryptGenerateSymmetricKey(hAlg, &hKey, NULL, 0, aes_key, 32, 0)))
         goto cleanup;
@@ -86,7 +98,7 @@ int aes_encrypt(const uint8_t *key, const uint8_t *plain, DWORD plain_len,
         goto cleanup;
 
     /* 5. HMAC-SHA256 over IV + ciphertext */
-    if (!BCRYPT_SUCCESS(fnBCryptOpenAlgorithmProvider(&hHmac, BCRYPT_SHA256_ALGORITHM,
+    if (!BCRYPT_SUCCESS(fnBCryptOpenAlgorithmProvider(&hHmac, _sha,
             NULL, BCRYPT_ALG_HANDLE_HMAC_FLAG)))
         goto cleanup;
     if (!BCRYPT_SUCCESS(fnBCryptCreateHash(hHmac, &hHash, NULL, 0, hmac_key, 32, 0)))
@@ -125,6 +137,16 @@ int aes_decrypt(const uint8_t *key, const uint8_t *data, DWORD data_len,
     const uint8_t *ct  = data + 48;
     DWORD ct_len = data_len - 48;
 
+    /* Decode BCrypt algorithm names */
+    wchar_t _sha[ENC_BCRYPT_SHA256_LEN + 1];
+    xor_dec_w(_sha, ENC_BCRYPT_SHA256, ENC_BCRYPT_SHA256_LEN);
+    wchar_t _aes[ENC_BCRYPT_AES_LEN + 1];
+    xor_dec_w(_aes, ENC_BCRYPT_AES, ENC_BCRYPT_AES_LEN);
+    wchar_t _cm[ENC_BCRYPT_CHAIN_MODE_LEN + 1];
+    xor_dec_w(_cm, ENC_BCRYPT_CHAIN_MODE, ENC_BCRYPT_CHAIN_MODE_LEN);
+    wchar_t _cbc[ENC_BCRYPT_CHAIN_MODE_VAL_LEN + 1];
+    xor_dec_w(_cbc, ENC_BCRYPT_CHAIN_MODE_VAL, ENC_BCRYPT_CHAIN_MODE_VAL_LEN);
+
     /* Derive separate sub-keys */
     uint8_t aes_key[32], hmac_key[32];
     char lbl_aes[ENC_CRYPTO_AES_CBC_LEN + 1];
@@ -142,7 +164,7 @@ int aes_decrypt(const uint8_t *key, const uint8_t *data, DWORD data_len,
     BCRYPT_HASH_HANDLE hHash = NULL;
     int ret = -1;
 
-    if (!BCRYPT_SUCCESS(fnBCryptOpenAlgorithmProvider(&hHmac, BCRYPT_SHA256_ALGORITHM,
+    if (!BCRYPT_SUCCESS(fnBCryptOpenAlgorithmProvider(&hHmac, _sha,
             NULL, BCRYPT_ALG_HANDLE_HMAC_FLAG)))
         goto cleanup;
     if (!BCRYPT_SUCCESS(fnBCryptCreateHash(hHmac, &hHash, NULL, 0, hmac_key, 32, 0)))
@@ -162,10 +184,10 @@ int aes_decrypt(const uint8_t *key, const uint8_t *data, DWORD data_len,
     BCRYPT_ALG_HANDLE hAlg = NULL;
     BCRYPT_KEY_HANDLE hKey = NULL;
 
-    if (!BCRYPT_SUCCESS(fnBCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0)))
+    if (!BCRYPT_SUCCESS(fnBCryptOpenAlgorithmProvider(&hAlg, _aes, NULL, 0)))
         goto cleanup;
-    if (!BCRYPT_SUCCESS(fnBCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE,
-            (PUCHAR)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0)))
+    if (!BCRYPT_SUCCESS(fnBCryptSetProperty(hAlg, _cm,
+            (PUCHAR)_cbc, (ULONG)(wcslen(_cbc) + 1) * sizeof(wchar_t), 0)))
         goto cleanup_aes;
     if (!BCRYPT_SUCCESS(fnBCryptGenerateSymmetricKey(hAlg, &hKey, NULL, 0, aes_key, 32, 0)))
         goto cleanup_aes;
@@ -226,7 +248,9 @@ int rsa_encrypt_pubkey(const char *pem, const uint8_t *plain, DWORD plain_len,
     }
 
     /* 4. RSA-OAEP-SHA256 encrypt */
-    BCRYPT_OAEP_PADDING_INFO oaep = { BCRYPT_SHA256_ALGORITHM, NULL, 0 };
+    wchar_t _sha[ENC_BCRYPT_SHA256_LEN + 1];
+    xor_dec_w(_sha, ENC_BCRYPT_SHA256, ENC_BCRYPT_SHA256_LEN);
+    BCRYPT_OAEP_PADDING_INFO oaep = { _sha, NULL, 0 };
     ULONG result_len = 0;
     NTSTATUS status = fnBCryptEncrypt(hKey, (PUCHAR)plain, plain_len, &oaep,
                                     NULL, 0, out, *out_len, &result_len,

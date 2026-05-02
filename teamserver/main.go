@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -68,6 +69,9 @@ func main() {
 	}
 
 	ui.Banner()
+	if out, err := exec.Command("python3", "-c", "import donut").CombinedOutput(); err != nil {
+		ui.Errorf("donut", "python3-donut not installed — execute-assembly will not work (%s)", string(out))
+	}
 	go version.CheckForUpdates()
 
 	p, err := persist.New("~/.bebop")

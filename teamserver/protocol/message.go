@@ -32,6 +32,14 @@ const (
 )
 
 const (
+	TaskExecAssembly uint8 = 14
+)
+
+const (
+	CodeExecAssembly uint8 = 0
+)
+
+const (
 	ConnSession uint8 = 0
 	ConnShell   uint8 = 1
 	ConnSocks   uint8 = 2

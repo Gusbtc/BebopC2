@@ -13,6 +13,7 @@ add_executable(beacon
     src/comms/socks.c
     src/exec/exec.c
     src/exec/builtin.c
+    src/exec/assembly.c
     src/resolve/resolve.c
     src/resolve/dynapi.c
     src/transfer/transfer.c

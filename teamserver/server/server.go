@@ -81,6 +81,7 @@ func Run(port int, host string, s *store.Store, privKey *rsa.PrivateKey, beaconS
 
 	// File transfer routes
 	mux.HandleFunc("POST /api/upload", cors(h.authMiddleware(h.HandleUpload)))
+	mux.HandleFunc("OPTIONS /api/upload", cors(func(w http.ResponseWriter, r *http.Request) {}))
 	mux.HandleFunc("GET /api/loot", cors(h.authMiddleware(h.HandleListFiles)))
 	mux.HandleFunc("OPTIONS /api/loot", cors(func(w http.ResponseWriter, r *http.Request) {}))
 	mux.HandleFunc("GET /api/files/{label}", cors(h.authMiddleware(h.HandleGetFile)))
@@ -97,6 +98,17 @@ func Run(port int, host string, s *store.Store, privKey *rsa.PrivateKey, beaconS
 	mux.HandleFunc("DELETE /api/socks/{id}", cors(h.authMiddleware(h.HandleStopSocks)))
 	mux.HandleFunc("OPTIONS /api/socks", cors(func(w http.ResponseWriter, r *http.Request) {}))
 	mux.HandleFunc("OPTIONS /api/socks/{id}", cors(func(w http.ResponseWriter, r *http.Request) {}))
+
+	// Execute-assembly routes
+	mux.HandleFunc("POST /api/exec-assembly", cors(h.authMiddleware(h.HandleExecAssembly)))
+	mux.HandleFunc("OPTIONS /api/exec-assembly", cors(func(w http.ResponseWriter, r *http.Request) {}))
+
+	// Assembly library routes
+	mux.HandleFunc("POST /api/assemblies", cors(h.authMiddleware(h.HandleAssemblyUpload)))
+	mux.HandleFunc("GET /api/assemblies", cors(h.authMiddleware(h.HandleAssemblyList)))
+	mux.HandleFunc("DELETE /api/assemblies/{name}", cors(h.authMiddleware(h.HandleAssemblyDelete)))
+	mux.HandleFunc("OPTIONS /api/assemblies", cors(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.HandleFunc("OPTIONS /api/assemblies/{name}", cors(func(w http.ResponseWriter, r *http.Request) {}))
 
 	// WebSocket for session results
 	if sl != nil {

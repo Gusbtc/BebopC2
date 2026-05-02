@@ -22,6 +22,9 @@
 #define TASK_SOCKS_START  29
 #define TASK_SOCKS_STOP   30
 
+#define TASK_EXEC_ASSEMBLY  14
+#define CODE_EXEC_ASSEMBLY  0
+
 /* Connection types for TCP handshake */
 #define CONN_SESSION  0
 #define CONN_SHELL    1

