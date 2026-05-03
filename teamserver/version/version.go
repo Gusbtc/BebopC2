@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	Current = "1.3.0"
-	repo    = "https://api.github.com/repos/Gusbtc/Bepop-Framework/releases/latest"
+	Current = "1.4.1"
+	repo    = "https://api.github.com/repos/Gusbtc/BebopC2/releases/latest"
 )
 
 type ghRelease struct {

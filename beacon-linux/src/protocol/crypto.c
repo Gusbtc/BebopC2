@@ -8,6 +8,8 @@
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/constant_time.h>
 #include "crypto.h"
+#include "util/obf.h"
+#include "obf_strings.h"
 
 mbedtls_entropy_context g_entropy;
 mbedtls_ctr_drbg_context g_drbg;
@@ -60,8 +62,14 @@ int aes_encrypt(const uint8_t session_key[32],
                 const uint8_t *plain, size_t plain_len,
                 uint8_t *out, size_t *out_len) {
     uint8_t aes_key[32], hmac_key[32];
-    if (derive_key(session_key, "aes-cbc", aes_key) != 0) return -1;
-    if (derive_key(session_key, "hmac-sha256", hmac_key) != 0) {
+
+    char _lbl_aes[ENC_CRYPTO_AES_CBC_LEN + 1];
+    xor_dec(_lbl_aes, ENC_CRYPTO_AES_CBC, ENC_CRYPTO_AES_CBC_LEN);
+    if (derive_key(session_key, _lbl_aes, aes_key) != 0) return -1;
+
+    char _lbl_hmac[ENC_CRYPTO_HMAC_SHA256_LEN + 1];
+    xor_dec(_lbl_hmac, ENC_CRYPTO_HMAC_SHA256, ENC_CRYPTO_HMAC_SHA256_LEN);
+    if (derive_key(session_key, _lbl_hmac, hmac_key) != 0) {
         explicit_bzero(aes_key, 32);
         return -1;
     }
@@ -123,8 +131,14 @@ int aes_decrypt(const uint8_t session_key[32],
     if (data_len < 48) return -1;
 
     uint8_t aes_key[32], hmac_key[32];
-    if (derive_key(session_key, "aes-cbc", aes_key) != 0) return -1;
-    if (derive_key(session_key, "hmac-sha256", hmac_key) != 0) {
+
+    char _lbl_aes[ENC_CRYPTO_AES_CBC_LEN + 1];
+    xor_dec(_lbl_aes, ENC_CRYPTO_AES_CBC, ENC_CRYPTO_AES_CBC_LEN);
+    if (derive_key(session_key, _lbl_aes, aes_key) != 0) return -1;
+
+    char _lbl_hmac[ENC_CRYPTO_HMAC_SHA256_LEN + 1];
+    xor_dec(_lbl_hmac, ENC_CRYPTO_HMAC_SHA256, ENC_CRYPTO_HMAC_SHA256_LEN);
+    if (derive_key(session_key, _lbl_hmac, hmac_key) != 0) {
         explicit_bzero(aes_key, 32);
         return -1;
     }

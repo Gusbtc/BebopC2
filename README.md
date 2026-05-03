@@ -30,14 +30,14 @@ The Windows beacon is native Win32 with no CRT API dependencies in the IAT. All 
          OPERATOR NETWORK                              TARGET NETWORK
   ┌─────────────────────────────────┐           ┌─────────────────────────┐
   │                                 │           │                         │
-  │  ┌──────────┐   ┌────────────┐ │  HTTP/S   │  ┌─────────┐           │
-  │  │ Operator │──>│ Teamserver │─┼──── // ────┼─>│ Beacon  │──[WinAPI] │
-  │  │ Browser  │   └──────┬─────┘ │   TCP     │  ├─────────┤           │
-  │  └──────────┘          │       │──── // ────┼─>│ Beacon  │──[Linux]  │
-  │                   ┌────┴─────┐ │           │  └─────────┘           │
-  │                   │ Builder  │ │           │                         │
-  │                   │MinGW/musl│ │           │                         │
-  │                   └──────────┘ │           │                         │
+  │  ┌──────────┐   ┌────────────┐  │  HTTP/S   │  ┌─────────┐            │
+  │  │ Operator │──>│ Teamserver │──┼─── // ────┼─>│ Beacon  │──[WinAPI]  │
+  │  │ Browser  │   └──────┬─────┘  │   TCP     │  ├─────────┤            │
+  │  └──────────┘          │        │──── // ───┼─>│ Beacon  │──[Linux]   │
+  │                   ┌────┴─────┐  │           │  └─────────┘            │
+  │                   │ Builder  │  │           │                         │
+  │                   │MinGW/musl│  │           │                         │
+  │                   └──────────┘  │           │                         │
   └─────────────────────────────────┘           └─────────────────────────┘
 
   Registration:  Beacon ──[RSA-OAEP(session_key + metadata)]──> Teamserver
@@ -244,20 +244,6 @@ operator-client/
 - [x] Execute-assembly for .NET tooling (Donut + sacrificial MSBuild.exe)
 - [x] File browser with tree view and context menu operations
 - [x] Operator-attributed event logging
-
-### Next
-- [ ] Ekko sleep masking (RC4 image encryption, VirtualProtect RW/RX toggle)
-- [ ] Direct syscalls to bypass EDR hooks (SysWhispers-style)
-- [ ] BOF loader for in-memory Beacon Object Files
-- [ ] Malleable C2 profiles (configurable HTTP headers, URIs, body encoding)
-- [ ] Beacon staging (minimal stager that downloads full beacon)
-
-### Later
-- [ ] ETW patching (EtwEventWrite in-memory patch)
-- [ ] AMSI bypass (AmsiScanBuffer patch)
-- [ ] DNS and SMB transport channels
-- [ ] Token manipulation for lateral movement
-- [ ] Screenshot and keylogger tasking
 
 ---
 

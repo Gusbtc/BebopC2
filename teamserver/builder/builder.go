@@ -154,9 +154,11 @@ func Build(p BuildParams) ([]byte, error) {
 	// cmake configure — platform-specific toolchain
 	var configure *exec.Cmd
 	if p.Platform == "linux" {
+		prefixMap := fmt.Sprintf("-ffile-prefix-map=%s/=", srcDir)
 		configure = exec.CommandContext(ctx, "cmake",
 			"-S", srcDir, "-B", buildDir,
-			"-DCMAKE_C_COMPILER=musl-gcc")
+			"-DCMAKE_C_COMPILER=musl-gcc",
+			"-DCMAKE_C_FLAGS="+prefixMap)
 	} else {
 		toolchain := filepath.Join(srcDir, "mingw64.cmake")
 		configure = exec.CommandContext(ctx, "cmake",

