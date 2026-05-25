@@ -6,10 +6,10 @@ import (
 )
 
 const (
-	TaskNOP  uint8 = 0
-	TaskExit uint8 = 1
-	TaskSet  uint8 = 2
-	TaskRun  uint8 = 12
+	TaskNOP       uint8 = 0
+	TaskExit      uint8 = 1
+	TaskSet       uint8 = 2
+	TaskRun       uint8 = 12
 	TaskFileStage uint8 = 3
 	TaskFileExfil uint8 = 4
 )
@@ -32,11 +32,21 @@ const (
 )
 
 const (
-	TaskExecAssembly uint8 = 14
+	TaskExecAssembly   uint8 = 14
+	TaskInlineAssembly uint8 = 15
+	TaskBOF            uint8 = 16
 )
 
 const (
-	CodeExecAssembly uint8 = 0
+	CodeExecAssembly   uint8 = 0
+	CodeInlineAssembly uint8 = 0
+	CodeBOF            uint8 = 0
+)
+
+const (
+	InlineModeAuto   uint32 = 0
+	InlineModeBridge uint32 = 1
+	InlineModeDirect uint32 = 2
 )
 
 const (

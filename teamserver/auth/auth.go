@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,7 +83,12 @@ func New(dbPath string) (*Auth, error) {
 		return nil, fmt.Errorf("create dir: %w", err)
 	}
 
-	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000", dbPath)
+	dbURL := url.URL{Scheme: "file", Path: dbPath}
+	q := dbURL.Query()
+	q.Set("_journal_mode", "WAL")
+	q.Set("_busy_timeout", "5000")
+	dbURL.RawQuery = q.Encode()
+	dsn := dbURL.String()
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -128,6 +134,12 @@ func (a *Auth) ValidatePassword(username, password string) bool {
 		return false
 	}
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
+func (a *Auth) OperatorExists(username string) bool {
+	var count int
+	err := a.db.QueryRow("SELECT COUNT(*) FROM operators WHERE username = ?", username).Scan(&count)
+	return err == nil && count > 0
 }
 
 func (a *Auth) OperatorCount() (int, error) {

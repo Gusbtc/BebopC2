@@ -3,6 +3,8 @@ package persist_test
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,13 +12,14 @@ import (
 	"c2/persist"
 )
 
-func newP(t *testing.T) *persist.Persister {
+func newP(t *testing.T) (*persist.Persister, string) {
 	t.Helper()
-	p, err := persist.New(t.TempDir())
+	dir := t.TempDir()
+	p, err := persist.New(dir)
 	if err != nil {
 		t.Fatalf("persist.New: %v", err)
 	}
-	return p
+	return p, dir
 }
 
 func genKey(t *testing.T) *rsa.PrivateKey {
@@ -29,14 +32,14 @@ func genKey(t *testing.T) *rsa.PrivateKey {
 }
 
 func TestHasSession_FalseWhenEmpty(t *testing.T) {
-	p := newP(t)
+	p, _ := newP(t)
 	if p.HasSession() {
 		t.Fatal("expected HasSession=false on fresh dir")
 	}
 }
 
 func TestHasSession_TrueAfterSave(t *testing.T) {
-	p := newP(t)
+	p, _ := newP(t)
 	p.SaveRSAKey(genKey(t))
 	p.SaveListeners([]*models.Listener{})
 	if !p.HasSession() {
@@ -45,7 +48,7 @@ func TestHasSession_TrueAfterSave(t *testing.T) {
 }
 
 func TestSaveAndLoadListeners(t *testing.T) {
-	p := newP(t)
+	p, _ := newP(t)
 	p.SaveRSAKey(genKey(t))
 
 	ls := []*models.Listener{
@@ -76,7 +79,7 @@ func TestSaveAndLoadListeners(t *testing.T) {
 }
 
 func TestSaveAndLoadBeacons(t *testing.T) {
-	p := newP(t)
+	p, _ := newP(t)
 	p.SaveRSAKey(genKey(t))
 
 	now := time.Now().Truncate(time.Second)
@@ -110,11 +113,11 @@ func TestSaveAndLoadBeacons(t *testing.T) {
 func TestSaveAndLoadResults(t *testing.T) {
 	// SaveResults was removed from persist; results are now stored in SQLite via the store layer.
 	// This test is intentionally a no-op to keep the file compiling.
-	_ = newP(t)
+	_, _ = newP(t)
 }
 
 func TestSaveAndLoadRSAKey(t *testing.T) {
-	p := newP(t)
+	p, _ := newP(t)
 	key := genKey(t)
 	p.SaveRSAKey(key)
 
@@ -131,7 +134,7 @@ func TestSaveAndLoadRSAKey(t *testing.T) {
 }
 
 func TestReset(t *testing.T) {
-	p := newP(t)
+	p, _ := newP(t)
 	p.SaveRSAKey(genKey(t))
 	p.SaveListeners([]*models.Listener{})
 
@@ -144,7 +147,7 @@ func TestReset(t *testing.T) {
 }
 
 func TestReadMeta(t *testing.T) {
-	p := newP(t)
+	p, _ := newP(t)
 	p.SaveRSAKey(genKey(t))
 	p.SaveListeners([]*models.Listener{
 		{ID: 1, Name: "x", Scheme: "http", Host: "h", Port: 80},
@@ -159,5 +162,61 @@ func TestReadMeta(t *testing.T) {
 	}
 	if m.SavedAt.IsZero() {
 		t.Error("SavedAt is zero")
+	}
+}
+
+func TestReadMeta_RebuildsCorruptMeta(t *testing.T) {
+	p, dir := newP(t)
+	p.SaveRSAKey(genKey(t))
+	p.SaveListeners([]*models.Listener{
+		{ID: 1, Name: "a", Scheme: "http", Host: "h1", Port: 80},
+		{ID: 2, Name: "b", Scheme: "https", Host: "h2", Port: 443},
+	})
+	p.SaveBeacons([]*models.Beacon{{ImplantMetadata: models.ImplantMetadata{ID: 7}}})
+	p.SaveTerminals(map[uint32]*models.TerminalState{
+		1: {},
+		2: {},
+	})
+	p.SaveLoot([]*models.ExfilEntry{{Label: 1}})
+
+	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte{0x00, 0x01}, 0600); err != nil {
+		t.Fatalf("WriteFile(meta.json): %v", err)
+	}
+
+	m, err := p.ReadMeta()
+	if err != nil {
+		t.Fatalf("ReadMeta: %v", err)
+	}
+	if m.Listeners != 2 || m.Beacons != 1 || m.Terminals != 2 || m.Loot != 1 {
+		t.Fatalf("rebuilt meta mismatch: %#v", m)
+	}
+	if m.SavedAt.IsZero() {
+		t.Fatal("SavedAt is zero")
+	}
+}
+
+func TestLoad_IgnoresCorruptJSONStateFiles(t *testing.T) {
+	p, dir := newP(t)
+	p.SaveRSAKey(genKey(t))
+
+	if err := os.WriteFile(filepath.Join(dir, "beacons.json"), []byte{0x00, 0x01}, 0600); err != nil {
+		t.Fatalf("WriteFile(beacons.json): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "listeners.json"), []byte("[]"), 0600); err != nil {
+		t.Fatalf("WriteFile(listeners.json): %v", err)
+	}
+
+	sess, err := p.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(sess.Beacons) != 0 {
+		t.Fatalf("expected corrupt beacons.json to be ignored, got %d beacons", len(sess.Beacons))
+	}
+	if len(sess.Listeners) != 0 {
+		t.Fatalf("expected 0 listeners, got %d", len(sess.Listeners))
+	}
+	if sess.PrivKey == nil {
+		t.Fatal("expected RSA key to still load")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 )
 
 const (
-	Current = "1.4.1"
+	Current = "1.5.0"
 	repo    = "https://api.github.com/repos/Gusbtc/BebopC2/releases/latest"
 )
 
@@ -38,10 +39,53 @@ func CheckForUpdates() {
 	}
 
 	remote := strings.TrimPrefix(rel.TagName, "v")
-	if remote != "" && remote != Current {
+	if remote != "" && isNewerVersion(remote, Current) {
 		ui.Blank()
 		ui.Action("update", fmt.Sprintf("new version available: %s (current: %s)", remote, Current))
 		ui.Detail(rel.HTMLURL)
 		ui.Blank()
 	}
+}
+
+func isNewerVersion(remote, current string) bool {
+	parse := func(v string) ([]int, bool) {
+		parts := strings.Split(v, ".")
+		out := make([]int, 0, len(parts))
+		for _, part := range parts {
+			n, err := strconv.Atoi(part)
+			if err != nil {
+				return nil, false
+			}
+			out = append(out, n)
+		}
+		return out, true
+	}
+
+	rv, rok := parse(remote)
+	cv, cok := parse(current)
+	if !rok || !cok {
+		return remote != current
+	}
+
+	maxLen := len(rv)
+	if len(cv) > maxLen {
+		maxLen = len(cv)
+	}
+	for i := 0; i < maxLen; i++ {
+		r := 0
+		c := 0
+		if i < len(rv) {
+			r = rv[i]
+		}
+		if i < len(cv) {
+			c = cv[i]
+		}
+		if r > c {
+			return true
+		}
+		if r < c {
+			return false
+		}
+	}
+	return false
 }

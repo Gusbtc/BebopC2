@@ -46,7 +46,7 @@ func TestEncodeNarrow_DifferentHosts(t *testing.T) {
 
 func TestGenerate_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := obfgen.Generate("10.0.0.1", dir); err != nil {
+	if err := obfgen.Generate("10.0.0.1", dir, "windows"); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "obf_strings.h")); err != nil {
@@ -56,7 +56,7 @@ func TestGenerate_CreatesFile(t *testing.T) {
 
 func TestGenerate_ContainsAllNames(t *testing.T) {
 	dir := t.TempDir()
-	if err := obfgen.Generate("10.0.0.1", dir); err != nil {
+	if err := obfgen.Generate("10.0.0.1", dir, "windows"); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "obf_strings.h"))
@@ -78,7 +78,7 @@ func TestGenerate_ContainsAllNames(t *testing.T) {
 
 func TestGenerate_ServerHostSubstituted(t *testing.T) {
 	dir := t.TempDir()
-	if err := obfgen.Generate("192.168.1.99", dir); err != nil {
+	if err := obfgen.Generate("192.168.1.99", dir, "windows"); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "obf_strings.h"))
@@ -92,7 +92,7 @@ func TestGenerate_ServerHostSubstituted(t *testing.T) {
 
 func TestGenerate_Roundtrip_PathRegister(t *testing.T) {
 	dir := t.TempDir()
-	if err := obfgen.Generate("10.0.0.1", dir); err != nil {
+	if err := obfgen.Generate("10.0.0.1", dir, "windows"); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	enc := obfgen.EncodeNarrow("/api/register")
@@ -114,7 +114,7 @@ func TestGenerate_Roundtrip_PathRegister(t *testing.T) {
 
 func TestGenerate_EmptyHostReturnsError(t *testing.T) {
 	dir := t.TempDir()
-	if err := obfgen.Generate("", dir); err == nil {
+	if err := obfgen.Generate("", dir, "windows"); err == nil {
 		t.Error("Generate with empty host should return error")
 	}
 }

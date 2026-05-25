@@ -6,7 +6,12 @@ function renderTable(beacons) {
     const tbody = document.getElementById('beacons-table-body');
     if (!tbody) return;
 
+    beacons = Array.isArray(beacons) ? beacons : [];
     tbody.innerHTML = '';
+    if (beacons.length === 0) {
+        return;
+    }
+
     beacons.slice().sort((a, b) => a.id - b.id).forEach(b => {
         if (b.shell_active) _activeShells.add(b.id);
         else _activeShells.delete(b.id);
@@ -27,7 +32,7 @@ function renderTable(beacons) {
                     <span class="card-badge badge-${status}">${status.toUpperCase()}</span>
                 </div>
             </td>
-            <td style="color: var(--amber)">${escapeHtml(b.hostname || '?')} <span class="badge-beacon">BEACON</span></td>
+            <td style="color: var(--amber)">${escapeHtml(b.hostname || '?')} <span class="badge-beacon">BEACON</span>${socksBadgeHtml}</td>
             <td>${escapeHtml(b.username || '—')}</td>
             <td>${escapeHtml(os)}</td>
             <td>${escapeHtml(integ)}</td>
@@ -383,7 +388,7 @@ function renderMap(beacons) {
 
         const pos = _manualPositions[id];
         const node = document.createElement('div');
-        node.className = 'map-node node-victim' + (b.platform === 0 ? ' linux' : '') + (!b.alive ? ' dead' : '');
+        node.className = beaconMapNodeClass(b);
         node.style.left = (pos.x - offset) + 'px';
         node.style.top = (pos.y - offset) + 'px';
         node.innerHTML = `<div class="node-icon"></div><div class="node-label">${escapeHtml(b.username || '?')}@${escapeHtml(b.hostname || '?')}</div>`;
@@ -428,6 +433,7 @@ function initDraggable(el, id) {
 // ---- Session list rendering ----
 
 function _renderSessionsList(beacons) {
+    beacons = Array.isArray(beacons) ? beacons : [];
     const noMsg = document.getElementById('no-sessions');
 
     updateConnIndicator(true);
@@ -479,6 +485,33 @@ function _renderSessionsList(beacons) {
     }
 }
 
+function beaconMapNodeClass(b) {
+    const classes = ['map-node', 'node-victim'];
+    if (b.platform === 0) classes.push('linux');
+    if (b.platform === 2) classes.push('windows');
+    if (isLinuxRootBeacon(b)) classes.push('linux-root');
+    if (isWindowsPrivilegedBeacon(b)) classes.push('windows-system');
+    if (!b.alive) classes.push('dead');
+    return classes.join(' ');
+}
+
+function beaconUsernameLeaf(b) {
+    const raw = String((b && b.username) || '').trim();
+    if (!raw) return '';
+    const parts = raw.split(/[\\/@]+/);
+    return (parts[parts.length - 1] || raw).toLowerCase();
+}
+
+function isLinuxRootBeacon(b) {
+    return b && b.platform === 0 && beaconUsernameLeaf(b) === 'root';
+}
+
+function isWindowsPrivilegedBeacon(b) {
+    const user = beaconUsernameLeaf(b);
+    return !!b && b.platform === 2 &&
+        (user === 'system' || user === 'administrator' || b.integrity === 4);
+}
+
 function _renderSessionsFromCache() {
     _renderSessionsList(Object.values(_beacons));
 }
@@ -512,6 +545,12 @@ function _renderEventEntry(ts, msg) {
     body.scrollTop = body.scrollHeight;
 }
 
+function _renderEventEmpty() {
+    const body = document.getElementById('event-log-body');
+    if (!body) return;
+    body.innerHTML = '<div class="event-log-empty">no events yet&hellip;</div>';
+}
+
 function _appendEventEntry(evt) {
     const d  = new Date(evt.timestamp);
     const ts = _formatTs(d);
@@ -527,6 +566,10 @@ async function loadEventLog() {
         if (!resp.ok) return;
         const events = await resp.json();
         if (!events) return;
+        if (Array.isArray(events) && events.length === 0 && _eventLog.length === 0) {
+            _renderEventEmpty();
+            return;
+        }
 
         const knownCount = _eventLog.length;
         if (events.length <= knownCount) return;
@@ -588,12 +631,17 @@ async function populateBuildListeners() {
     const tsUrl = getTsUrl();
     const sel = document.getElementById('buildListener');
     if (!sel) return;
-    if (!tsUrl) { sel.innerHTML = '<option value="">— connect to teamserver first —</option>'; return; }
+    if (!tsUrl) {
+        sel.innerHTML = '<option value="">— connect to teamserver first —</option>';
+        updateConnIndicator(false);
+        return;
+    }
 
     try {
         const resp = await authFetch(tsUrl + '/api/listeners');
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const listeners = await resp.json();
+        updateConnIndicator(true);
         sel.innerHTML = '<option value="">— select a listener —</option>';
         for (const l of (listeners || [])) {
             const opt = document.createElement('option');
@@ -605,6 +653,7 @@ async function populateBuildListeners() {
         }
     } catch (e) {
         sel.innerHTML = '<option value="">— could not load listeners —</option>';
+        updateConnIndicator(false);
     }
 }
 
@@ -747,13 +796,13 @@ async function loadListeners() {
                 ? (l.auto_cert
                     ? '<span class="listener-badge badge-autocert">self-signed</span>'
                     : '<span class="listener-badge badge-realcert">custom</span>')
-                : '<span style="color:var(--text-dim);font-family:\'Share Tech Mono\',monospace;font-size:11px;">—</span>';
+                : '<span style="color:var(--text-dim);font-family:var(--font-mono);font-size:11px;">—</span>';
 
             tr.innerHTML =
                 '<td style="color:var(--text-dim);">' + l.id + '</td>' +
                 '<td>' + escapeHtml(l.name) + '</td>' +
                 '<td>' + schemeBadge + '</td>' +
-                '<td style="font-family:\'Share Tech Mono\',monospace;">' + escapeHtml(l.host || '—') + '</td>' +
+                '<td style="font-family:var(--font-mono);">' + escapeHtml(l.host || '—') + '</td>' +
                 '<td>' + l.port + '</td>' +
                 '<td>' + certBadge + '</td>';
             tr.addEventListener('contextmenu', (e) => { e.preventDefault(); showListenerContextMenu(e, l); });
@@ -953,13 +1002,15 @@ let _activeLogTab = 'events';
 
 function switchLogTab(tab) {
     _activeLogTab = tab;
-    const evBody   = document.getElementById('event-log-body');
-    const lootBody = document.getElementById('loot-log-body');
-    const chatBody = document.getElementById('chat-log-body');
+    const evBody      = document.getElementById('event-log-body');
+    const lootBody    = document.getElementById('loot-log-body');
+    const libraryBody = document.getElementById('library-log-body');
+    const chatBody    = document.getElementById('chat-log-body');
     if (!evBody || !lootBody) return;
 
-    evBody.style.display   = tab === 'events' ? '' : 'none';
-    lootBody.style.display = tab === 'loot'   ? '' : 'none';
+    evBody.style.display      = tab === 'events'  ? '' : 'none';
+    lootBody.style.display    = tab === 'loot'    ? '' : 'none';
+    if (libraryBody) libraryBody.style.display = tab === 'library' ? '' : 'none';
     if (chatBody) chatBody.style.display = tab === 'chat' ? '' : 'none';
 
     document.querySelectorAll('.event-log-tab').forEach(el => {
@@ -975,6 +1026,258 @@ function switchLogTab(tab) {
         if (input) input.focus();
         const msgs = document.getElementById('chat-messages');
         if (msgs) msgs.scrollTop = msgs.scrollHeight;
+    } else if (tab === 'library') {
+        loadLibraryPanel();
+    }
+}
+
+let _mcpLastStatus = null;
+let _mcpTokenCache = '';
+let _mcpTokenVisible = false;
+
+function _mcpGenericPrompt(status, tokenValue) {
+    const endpoint = status && status.endpoint ? status.endpoint : 'http://127.0.0.1:8080/api/mcp';
+    const token = tokenValue || '<paste-token-here>';
+    const mutation = status && status.mutation_default ? 'enabled' : 'disabled';
+    return [
+        'Configure this MCP client to use Bebop MCP over remote HTTP.',
+        '',
+        'Connection:',
+        '- Transport: Streamable HTTP JSON-RPC',
+        '- URL: ' + endpoint,
+        '- Header: Authorization: Bearer ' + token,
+        '- Attribution: this token is bound to the logged-in operator; event log and chat entries use that operator name.',
+        '- Local binaries, environment variables, and project checkout are not required.',
+        '',
+        'Use one of these generic config shapes if the client asks for configuration:',
+        '',
+        'JSON:',
+        '{',
+        '  "mcpServers": {',
+        '    "bebop": {',
+        '      "type": "http",',
+        '      "url": "' + endpoint + '",',
+        '      "headers": {',
+        '        "Authorization": "Bearer ' + token + '"',
+        '      }',
+        '    }',
+        '  }',
+        '}',
+        '',
+        'TOML:',
+        '[mcp_servers.bebop]',
+        'url = "' + endpoint + '"',
+        'http_headers = { Authorization = "Bearer ' + token + '" }',
+        '',
+        'After setup, verify with read-only MCP calls:',
+        '1. initialize',
+        '2. tools/list',
+        '3. resources/list',
+        '4. bebop.sessions.list',
+        '',
+        'Operating policy:',
+        '- Mutating tools on this teamserver: ' + mutation + '.',
+        '- Inspect sessions, events, loot, library, and prior results before tasking.',
+        '- Use structured args arrays; do not guess shell syntax when a tool schema exists.',
+        '- Only call mutating tools when the operator explicitly gives a beacon_id and action.',
+        '- Prefer waitable tools for operator-like behavior: bebop.command.execute, bebop.bof.execute.wait, bebop.inline-assembly.execute.wait.',
+        '- Available operator groups:',
+        '  - Read state: sessions, results, events, loot, library, terminal, chat.',
+        '  - Tasking: commands, BOFs, inline assembly, sleep, interactive, SOCKS.',
+        '  - Files: upload, download, loot retrieval, loot delete.',
+        '  - Management: listeners, builds, library upload/delete.',
+        '- Destructive tools require confirm=true. Only pass confirm=true when the operator explicitly requests deletion or beacon exit.',
+    ].join('\n');
+}
+
+async function _copyMCPPrompt() {
+    const promptEl = document.getElementById('mcp-setup-prompt');
+    if (!promptEl) return;
+    if (!_mcpTokenCache && _mcpLastStatus && _mcpLastStatus.token_configured) {
+        await _fetchMCPToken();
+        _mcpTokenVisible = true;
+        _syncMCPTokenUI();
+    }
+    promptEl.focus();
+    promptEl.select();
+    if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(promptEl.value);
+        return;
+    }
+    document.execCommand('copy');
+}
+
+function _mcpToolList(items) {
+    if (!items || items.length === 0) {
+        return '<div class="mcp-list-empty">none</div>';
+    }
+    return '<ul class="mcp-list">' + items.map(item => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul>';
+}
+
+function _mcpToolGroups(status) {
+    const readonly = status && status.tools_readonly ? status.tools_readonly : [];
+    const mutating = status && status.tools_mutating ? status.tools_mutating : [];
+    return [
+        { title: 'Read state', tools: readonly.filter(t => t.includes('.list') || t.includes('.get') || t.includes('.describe') || t.includes('commands.')) },
+        { title: 'Tasking', tools: mutating.filter(t => t.includes('command') || t.includes('bof') || t.includes('inline-assembly') || t.includes('beacon.sleep') || t.includes('beacon.interactive') || t.includes('session.close') || t.includes('socks') || t.includes('filebrowser.list') || t.includes('identity.') || t.includes('process.') || t.includes('net.') || t.includes('domain.') || t.includes('fs.')) },
+        { title: 'Files', tools: mutating.filter(t => t.includes('file.') || t.includes('loot.')) },
+        { title: 'Library', tools: mutating.filter(t => t.includes('library.') || t.includes('assembly.')) },
+        { title: 'Management', tools: mutating.filter(t => t.includes('listener') || t.includes('beacon.build') || t.includes('beacon.exit')) },
+        { title: 'Operator state', tools: mutating.filter(t => t.includes('terminal.') || t.includes('cache.') || t.includes('events.') || t.includes('chat.')) },
+    ].filter(group => group.tools.length > 0);
+}
+
+function _mcpToolGroupCards(status) {
+    const groups = _mcpToolGroups(status);
+    if (!groups.length) return '<div class="mcp-list-empty">none</div>';
+    return groups.map(group => [
+        '<section class="mcp-tool-group">',
+            '<div class="mcp-section-title">' + escapeHtml(group.title) + '</div>',
+            _mcpToolList(group.tools),
+        '</section>',
+    ].join('')).join('');
+}
+
+function _mcpTokenBlock(status) {
+    const configured = !!(status && status.token_configured);
+    const value = configured ? '••••••••••••••••••••••••' : 'not configured';
+    const disabled = configured ? '' : ' disabled';
+    return [
+        '<div class="mcp-token-card">',
+            '<div class="mcp-section-head">',
+                '<div class="mcp-section-title">mcp token</div>',
+                '<button class="mcp-token-toggle" id="mcp-token-toggle" onclick="toggleMCPToken()"', disabled, '>',
+                    configured ? 'Reveal' : 'Unavailable',
+                '</button>',
+            '</div>',
+            '<input class="mcp-token-input" id="mcp-token-field" type="password" readonly value="', escapeHtml(value), '" onclick="toggleMCPToken()"', disabled, '>',
+        '</div>',
+    ].join('');
+}
+
+function _syncMCPTokenUI() {
+    const field = document.getElementById('mcp-token-field');
+    const toggle = document.getElementById('mcp-token-toggle');
+    const promptEl = document.getElementById('mcp-setup-prompt');
+    if (!field || !toggle) return;
+
+    if (!_mcpLastStatus || !_mcpLastStatus.token_configured) {
+        field.type = 'text';
+        field.value = 'not configured';
+        toggle.textContent = 'Unavailable';
+        toggle.disabled = true;
+        return;
+    }
+
+    toggle.disabled = false;
+    if (_mcpTokenVisible && _mcpTokenCache) {
+        field.type = 'text';
+        field.value = _mcpTokenCache;
+        toggle.textContent = 'Hide';
+        if (promptEl) promptEl.value = _mcpGenericPrompt(_mcpLastStatus, _mcpTokenCache);
+        return;
+    }
+
+    field.type = 'password';
+    field.value = _mcpTokenCache || '••••••••••••••••••••••••';
+    toggle.textContent = 'Reveal';
+    if (promptEl) promptEl.value = _mcpGenericPrompt(_mcpLastStatus, '');
+}
+
+async function _fetchMCPToken() {
+    if (_mcpTokenCache) return _mcpTokenCache;
+    const tsUrl = getTsUrl();
+    if (!tsUrl) throw new Error('teamserver not configured');
+    const resp = await authFetch(tsUrl + '/api/mcp/token');
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    _mcpTokenCache = data.token || '';
+    return _mcpTokenCache;
+}
+
+async function toggleMCPToken() {
+    if (!_mcpLastStatus || !_mcpLastStatus.token_configured) return;
+    try {
+        if (!_mcpTokenVisible) {
+            await _fetchMCPToken();
+            _mcpTokenVisible = true;
+        } else {
+            _mcpTokenVisible = false;
+        }
+        _syncMCPTokenUI();
+    } catch (e) {
+        const field = document.getElementById('mcp-token-field');
+        if (field) {
+            field.type = 'text';
+            field.value = 'token unavailable';
+        }
+    }
+}
+
+function _mcpUnavailablePanel(message) {
+    return [
+        '<div class="mcp-panel">',
+            '<div class="mcp-empty-state">',
+                '<div class="mcp-empty-title">mcp status unavailable</div>',
+                '<div class="mcp-empty-copy">' + escapeHtml(message || 'check teamserver connection') + '</div>',
+            '</div>',
+        '</div>',
+    ].join('');
+}
+
+async function loadMCPPanel(targetId) {
+    const tsUrl = getTsUrl();
+    const body = document.getElementById(targetId || 'mcp-page-body');
+    if (!body) return;
+    if (!tsUrl) {
+        body.innerHTML = _mcpUnavailablePanel('teamserver not configured');
+        updateConnIndicator(false);
+        return;
+    }
+
+    try {
+        const resp = await authFetch(tsUrl + '/api/mcp/status');
+        if (!resp.ok) throw new Error(await resp.text());
+        const status = await resp.json();
+        updateConnIndicator(true);
+        const mode = status.mode || 'http';
+        const endpoint = status.endpoint || ((status.teamserver_url || tsUrl) + '/api/mcp');
+        const tokenStatus = status.token_configured ? 'configured' : 'not configured';
+        const mutationStatus = status.mutation_default ? 'enabled' : 'disabled';
+        _mcpLastStatus = status;
+        _mcpTokenCache = '';
+        _mcpTokenVisible = false;
+        const prompt = _mcpGenericPrompt(status, '');
+        const tokenClass = status.token_configured ? 'ok' : 'warn';
+        const mutationClass = status.mutation_default ? 'ok' : 'warn';
+
+        body.innerHTML =
+            '<div class="mcp-panel">' +
+                '<div class="mcp-status-strip">' +
+                    '<div class="mcp-status-item"><span>mode</span><strong>' + escapeHtml(mode) + '</strong></div>' +
+                    '<div class="mcp-status-item"><span>endpoint</span><strong>' + escapeHtml(endpoint) + '</strong></div>' +
+                    '<div class="mcp-status-item mcp-state-' + tokenClass + '"><span>token</span><strong>' + escapeHtml(tokenStatus) + '</strong></div>' +
+                    '<div class="mcp-status-item mcp-state-' + mutationClass + '"><span>mutation</span><strong>' + escapeHtml(mutationStatus) + '</strong></div>' +
+                '</div>' +
+                '<div class="mcp-layout">' +
+                    '<div class="mcp-setup-column">' +
+                        '<div class="mcp-section-head">' +
+                            '<div class="mcp-section-title">setup prompt</div>' +
+                            '<button class="mcp-copy-btn" onclick="_copyMCPPrompt()">Copy prompt</button>' +
+                        '</div>' +
+                        '<textarea class="mcp-prompt" id="mcp-setup-prompt" readonly>' + escapeHtml(prompt) + '</textarea>' +
+                        _mcpTokenBlock(status) +
+                    '</div>' +
+                    '<div class="mcp-tools-column">' +
+                        '<div class="mcp-tools-grid">' +
+                            _mcpToolGroupCards(status) +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+    } catch (e) {
+        body.innerHTML = _mcpUnavailablePanel('teamserver did not return /api/mcp/status');
+        updateConnIndicator(false);
     }
 }
 
@@ -1068,6 +1371,197 @@ async function downloadLootEntry(label, filename) {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     } catch (_) {}
+}
+
+// ---- Library panel ----
+
+let _librarySignature = '';
+
+function _libraryKindLabel(kind) {
+    return kind === 'bof' ? 'BOF' : '.NET';
+}
+
+function _libraryEntrySignature(f) {
+    return [
+        f.source || '',
+        f.kind || '',
+        f.name || '',
+        f.file || '',
+        String(f.size || 0),
+        String(!!f.deletable),
+        f.updated_at || ''
+    ].join(':');
+}
+
+function _librarySourceLabel(source) {
+    return source === 'builtin' ? 'BUILTIN' : 'OPERATOR';
+}
+
+function _renderLibrarySection(list, title, files) {
+    const header = document.createElement('div');
+    header.className = 'library-section-label';
+    const heading = document.createElement('span');
+    heading.className = 'library-section-title';
+    heading.textContent = title;
+    header.appendChild(heading);
+    list.appendChild(header);
+
+    if (!files.length) {
+        const empty = document.createElement('div');
+        empty.className = 'library-section-empty';
+        empty.textContent = title === 'Built-in BOFs' ? 'no built-in BOFs available' : 'no operator files uploaded';
+        list.appendChild(empty);
+        return;
+    }
+
+    files.forEach(f => {
+        const d = new Date(f.updated_at);
+        const ts = String(d.getHours()).padStart(2, '0') + ':' +
+                   String(d.getMinutes()).padStart(2, '0') + ':' +
+                   String(d.getSeconds()).padStart(2, '0');
+
+        const entry = document.createElement('div');
+        entry.className = 'library-row library-row-' + String(f.source || 'operator');
+        entry.title = 'Updated ' + ts;
+
+        const source = document.createElement('span');
+        source.className = 'library-source library-source-' + String(f.source || 'operator');
+        source.textContent = _librarySourceLabel(f.source);
+
+        const kind = document.createElement('span');
+        kind.className = 'library-kind library-kind-' + String(f.kind || '');
+        kind.textContent = _libraryKindLabel(f.kind);
+
+        const name = document.createElement('span');
+        name.className = 'library-name';
+        if (f.description) name.title = f.description;
+        const primary = document.createElement('span');
+        primary.className = 'library-name-primary';
+        primary.textContent = f.name || '';
+        name.appendChild(primary);
+        if (f.description || f.usage) {
+            const secondary = document.createElement('span');
+            secondary.className = 'library-name-secondary';
+            secondary.textContent = f.usage || f.description;
+            name.appendChild(secondary);
+        }
+
+        const size = document.createElement('span');
+        size.className = 'library-size';
+        size.textContent = formatBytes(f.size || 0);
+
+        const actions = document.createElement('span');
+        actions.className = 'library-actions';
+
+        if (f.deletable !== false) {
+            const del = document.createElement('button');
+            del.className = 'loot-rm-btn';
+            del.title = 'Delete';
+            del.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+            del.addEventListener('click', () => deleteLibraryEntry(f.name, del));
+            actions.appendChild(del);
+        } else {
+            const fixed = document.createElement('span');
+            fixed.className = 'library-fixed';
+            fixed.title = 'Built-in';
+            fixed.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+            actions.appendChild(fixed);
+        }
+
+        entry.appendChild(source);
+        entry.appendChild(kind);
+        entry.appendChild(name);
+        entry.appendChild(size);
+        entry.appendChild(actions);
+        list.appendChild(entry);
+    });
+}
+
+async function loadLibraryPanel() {
+    const tsUrl = getTsUrl();
+    const list = document.getElementById('library-list');
+    if (!list || !tsUrl) return;
+
+    try {
+        const resp = await authFetch(tsUrl + '/api/library');
+        if (!resp.ok) return;
+        const files = await resp.json();
+
+        if (!files || files.length === 0) {
+            if (_librarySignature !== 'empty') {
+                list.innerHTML = '<div class="event-log-empty">no library files yet&hellip;</div>';
+                _librarySignature = 'empty';
+            }
+            return;
+        }
+
+        const builtin = files
+            .filter(f => f.source === 'builtin')
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+        const operatorFiles = files
+            .filter(f => f.source !== 'builtin')
+            .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+        const sig = files.map(_libraryEntrySignature).join('|');
+        if (sig === _librarySignature) return;
+        _librarySignature = sig;
+
+        list.innerHTML = '';
+        _renderLibrarySection(list, 'Operator files', operatorFiles);
+        _renderLibrarySection(list, 'Built-in BOFs', builtin);
+    } catch (_) {}
+}
+
+function openLibraryUploadPicker() {
+    let picker = document.getElementById('library-upload-picker');
+    if (!picker) {
+        picker = document.createElement('input');
+        picker.type = 'file';
+        picker.id = 'library-upload-picker';
+        picker.accept = '.o,.obj,.exe';
+        picker.style.display = 'none';
+        document.body.appendChild(picker);
+    }
+    picker.onchange = async () => {
+        const file = picker.files[0];
+        if (!file) return;
+        const fd = new FormData();
+        fd.append('file', file);
+        try {
+            const tsUrl = getTsUrl();
+            const resp = await authFetch(tsUrl + '/api/library', { method: 'POST', body: fd });
+            if (!resp.ok) {
+                alert('Library upload failed: ' + (await resp.text()));
+                return;
+            }
+            _librarySignature = '';
+            loadLibraryPanel();
+        } catch (e) {
+            alert('Library upload failed: ' + e.message);
+        } finally {
+            picker.value = '';
+        }
+    };
+    picker.click();
+}
+
+async function deleteLibraryEntry(name, btn) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) return;
+    try {
+        const resp = await authFetch(tsUrl + '/api/library/' + encodeURIComponent(name), { method: 'DELETE' });
+        if (!resp.ok) {
+            alert('Library delete failed: ' + (await resp.text()));
+            return;
+        }
+        if (btn) {
+            const row = btn.closest('.library-row');
+            if (row) row.remove();
+        }
+        _librarySignature = '';
+    } catch (e) {
+        alert('Library delete failed: ' + e.message);
+    }
+    loadLibraryPanel();
 }
 
 // ---- Operator chat ----

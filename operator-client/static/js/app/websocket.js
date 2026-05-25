@@ -4,26 +4,34 @@
 let _operatorWs = null;
 let _wsReconnectDelay = 1000;
 let _wsReconnectTimer = null;
+let _operatorWsConnecting = false;
 
-function connectOperatorWs() {
-    if (_operatorWs && _operatorWs.readyState <= WebSocket.OPEN) return;
+async function connectOperatorWs() {
+    if (_operatorWsConnecting || (_operatorWs && _operatorWs.readyState <= WebSocket.OPEN)) return;
 
-    const tsUrl = getTsUrl();
-    if (!tsUrl) return;
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = tsUrl.replace(/^https?:\/\//, '');
-    const token = localStorage.getItem('authToken') || '';
-    const wsUrl = `${proto}//${host}/ws/operator?token=${encodeURIComponent(token)}`;
+    _operatorWsConnecting = true;
+    let wsUrl;
+    try {
+        wsUrl = await makeWebSocketURL('/ws/operator');
+    } catch (_) {
+        _operatorWsConnecting = false;
+        _wsReconnectTimer = setTimeout(() => {
+            connectOperatorWs();
+        }, _wsReconnectDelay);
+        _wsReconnectDelay = Math.min(_wsReconnectDelay * 2, 30000);
+        return;
+    }
     _operatorWs = new WebSocket(wsUrl);
+    _operatorWsConnecting = false;
 
     _operatorWs.onopen = () => {
-        console.log('[ws] operator connected');
         _wsReconnectDelay = 1000;
+        updateConnIndicator(true);
     };
 
     _operatorWs.onclose = () => {
-        console.log('[ws] operator disconnected, reconnecting in', _wsReconnectDelay, 'ms');
         _operatorWs = null;
+        updateConnIndicator(false);
         _wsReconnectTimer = setTimeout(() => {
             connectOperatorWs();
         }, _wsReconnectDelay);
@@ -53,6 +61,9 @@ function _handleWsMessage(msg) {
             break;
         case 'loot':
             _handleLootMsg(action, data);
+            break;
+        case 'library':
+            _handleLibraryMsg(action, data);
             break;
         case 'listeners':
             _handleListenersMsg(action, data);
@@ -147,6 +158,14 @@ function _handleResultsMsg(action, data) {
         type: data.type || 0,
         filename: data.filename || '',
         output: data.output,
+        exit_code: data.exit_code,
+        stdout: data.stdout || '',
+        stderr: data.stderr || '',
+        exception: data.exception || '',
+        duration_ms: data.duration_ms || 0,
+        truncated: !!data.truncated,
+        mode: data.mode || '',
+        diagnostics: data.diagnostics || '',
         received_at: data.received_at
     };
 
@@ -161,6 +180,8 @@ function _handleResultsMsg(action, data) {
         loadLootPanel();
     } else if (result.type === 2) {
         appendLine('[+] ' + (result.output || 'config updated'), 'hint');
+    } else if (_isInlineAssemblyResult(result)) {
+        appendLine(_formatInlineAssemblyOutput(result), 'output');
     } else {
         if (result.output) {
             appendLine(result.output, 'output');
@@ -183,6 +204,9 @@ function _handleEventsMsg(action, data) {
         if (Array.isArray(data)) {
             data.forEach(evt => _appendEventEntry(evt));
         }
+        if (_eventLog.length === 0 && typeof _renderEventEmpty === 'function') {
+            _renderEventEmpty();
+        }
         return;
     }
     if (action === 'add') {
@@ -194,6 +218,12 @@ function _handleEventsMsg(action, data) {
 function _handleLootMsg(action, data) {
     if (action === 'add' || action === 'delete' || action === 'sync') {
         loadLootPanel();
+    }
+}
+
+function _handleLibraryMsg(action, data) {
+    if (action === 'add' || action === 'delete' || action === 'sync') {
+        loadLibraryPanel();
     }
 }
 
@@ -235,7 +265,7 @@ function _handleSocksMsg(action, data) {
 }
 
 function updateSocksBadge(beaconId, host, port) {
-    const row = document.querySelector('#beacons-table tbody tr[data-session-id="' + beaconId + '"]');
+    const row = document.querySelector('#beacons-table tbody tr[data-beacon-id="' + beaconId + '"], #beacons-table tbody tr[data-session-id="' + beaconId + '"]');
     if (!row) return;
     const cell = row.cells[1];
     if (!cell) return;
@@ -249,7 +279,7 @@ function updateSocksBadge(beaconId, host, port) {
 }
 
 function removeSocksBadge(beaconId) {
-    const row = document.querySelector('#beacons-table tbody tr[data-session-id="' + beaconId + '"]');
+    const row = document.querySelector('#beacons-table tbody tr[data-beacon-id="' + beaconId + '"], #beacons-table tbody tr[data-session-id="' + beaconId + '"]');
     if (!row) return;
     const badge = row.querySelector('.badge-socks5');
     if (badge) badge.parentNode.removeChild(badge);
@@ -312,11 +342,15 @@ document.addEventListener('visibilitychange', () => {
 if (document.getElementById('sessions-table-view') !== null) {
     if (!checkAuth()) { /* redirecting to /login */ }
     else {
-    initSettings();
-    connectOperatorWs();
+        initSettings();
+        connectOperatorWs();
+        loadSessions();
+        loadEventLog();
+        loadLootPanel();
+        loadLibraryPanel();
 
-    ['tsIp', 'tsPort'].forEach(id => {
-        const el = document.getElementById(id);
+        ['tsIp', 'tsPort'].forEach(id => {
+            const el = document.getElementById(id);
         if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') saveSettings(); });
     });
 
@@ -344,11 +378,18 @@ if (document.getElementById('sessions-table-view') !== null) {
                 clearInterval(_waitForSync);
                 const isSession = typeof _fbRestoreId === 'string' && _fbRestoreId.startsWith('fbs_');
                 const state = _fbGetState(fbBid, _fbRestoreId, isSession);
-                if (!state.tree[state.root]) {
-                    state.expanded.add(state.root);
-                    _fbSendTask(fbBid, state.root, isSession);
+                const renderFileBrowser = function() {
+                    if (!state.tree[state.root]) {
+                        state.expanded.add(state.root);
+                        _fbSendTask(fbBid, state.root, isSession);
+                    }
+                    _fbRender(fbBid, _fbRestoreId);
+                };
+                if (typeof _fbRestoreFromServer === 'function') {
+                    _fbRestoreFromServer(fbBid, _fbRestoreId, isSession).finally(renderFileBrowser);
+                } else {
+                    renderFileBrowser();
                 }
-                _fbRender(fbBid, _fbRestoreId);
             }, 200);
         } else {
             if (!_term) _initXterm('terminal');

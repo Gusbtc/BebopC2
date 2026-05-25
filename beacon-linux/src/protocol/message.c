@@ -64,6 +64,13 @@ void encode_run_rep(const char *output, uint8_t *out, int *out_len) {
     encode_run_req(output, out, out_len);
 }
 
+void encode_run_rep_len(const char *output, uint32_t output_len, uint8_t *out, int *out_len) {
+    put_u32(out, output_len);
+    if (output_len > 0 && output)
+        memcpy(out + 4, output, output_len);
+    *out_len = 4 + (int)output_len;
+}
+
 static int write_opt_u32(uint8_t *buf, uint32_t v) {
     buf[0] = 0x01;
     put_u32(buf + 1, v);

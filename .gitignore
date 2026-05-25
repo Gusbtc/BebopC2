@@ -2,11 +2,14 @@
 bin/
 *.exe
 *.dll
+!teamserver/resources/
+!teamserver/resources/Runtime.Loader.dll
 *.so
 
 # Build artifacts
 beacon/build/
 beacon/build_test/
+beacon-linux/build/
 
 # Compiled binaries
 operator-client/c2client
@@ -19,7 +22,6 @@ teamserver/gen_obf
 
 # Go
 teamserver/vendor/
-go.sum
 
 # Operational configs with real IPs
 *.env
@@ -37,4 +39,16 @@ exfil/
 
 # Test / scratch
 test/
+bof-tests/
 c2
+beacon/build-mingw/
+bin/
+
+# Managed bridge build artifacts
+managed-bridge/**/bin/
+managed-bridge/**/obj/
+
+# Documentation build artifacts
+documentation/node_modules/
+documentation/build/
+documentation/.docusaurus/

@@ -93,6 +93,18 @@ func readOptionalUint8(r *bytes.Reader, out *uint8) {
 
 const maxStringLen = 4096
 
+type InlineAssemblyResult struct {
+	ExitCode      int32
+	DurationMS    uint32
+	Truncated     bool
+	Stdout        string
+	Stderr        string
+	Exception     string
+	Mode          string
+	BridgeVersion string
+	Diagnostics   string
+}
+
 func readOptionalString(r *bytes.Reader) string {
 	if present, _ := r.ReadByte(); present != 0x01 {
 		return ""
@@ -211,4 +223,245 @@ func DecodeExecAssemblyReq(b []byte) (shellcode []byte, spawnto string, err erro
 	}
 	spawnto = string(b[off+4 : off+4+spawntoLen])
 	return shellcode, spawnto, nil
+}
+
+// EncodeBOFReq serializes a BOF task:
+// [4B obj_len][COFF object][4B args_len][packed args]
+func EncodeBOFReq(obj, args []byte) []byte {
+	b := make([]byte, 0, 4+len(obj)+4+len(args))
+	b = appendBytes32(b, obj)
+	b = appendBytes32(b, args)
+	return b
+}
+
+// EncodeInlineAssemblyBOFArgs serializes the argument buffer consumed by
+// the internal inline-assembly BOF:
+// [4B bridge_len][bridge][4B assembly_len][assembly][4B argc][args...]
+func EncodeInlineAssemblyBOFArgs(bridgeBytes, assemblyBytes []byte, args []string) []byte {
+	total := 4 + len(bridgeBytes) + 4 + len(assemblyBytes) + 4
+	for _, arg := range args {
+		total += 4 + len(arg)
+	}
+	b := make([]byte, 0, total)
+	b = appendBytes32(b, bridgeBytes)
+	b = appendBytes32(b, assemblyBytes)
+	b = appendUint32(b, uint32(len(args)))
+	for _, arg := range args {
+		b = appendBytes32(b, []byte(arg))
+	}
+	return b
+}
+
+func EncodeInlineAssemblyReq(bridgeBytes, assemblyBytes []byte, args []string, mode uint32) []byte {
+	total := 4 + 4 + len(bridgeBytes) + 4 + len(assemblyBytes) + 4
+	for _, arg := range args {
+		total += 4 + len(arg)
+	}
+
+	b := make([]byte, 0, total)
+	b = appendUint32(b, mode)
+	b = appendBytes32(b, bridgeBytes)
+	b = appendBytes32(b, assemblyBytes)
+	b = appendUint32(b, uint32(len(args)))
+	for _, arg := range args {
+		b = appendBytes32(b, []byte(arg))
+	}
+	return b
+}
+
+func DecodeInlineAssemblyReq(b []byte) (mode uint32, bridgeBytes, assemblyBytes []byte, args []string, err error) {
+	dec := payloadDecoder{name: "DecodeInlineAssemblyReq", data: b}
+
+	mode, err = dec.uint32("mode")
+	if err != nil {
+		return 0, nil, nil, nil, err
+	}
+	if mode != InlineModeDirect && mode != InlineModeBridge {
+		return 0, nil, nil, nil, fmt.Errorf("%s: invalid mode %d", dec.name, mode)
+	}
+	bridgeBytes, err = dec.bytes32("bridge bytes")
+	if err != nil {
+		return 0, nil, nil, nil, err
+	}
+	assemblyBytes, err = dec.bytes32("assembly bytes")
+	if err != nil {
+		return 0, nil, nil, nil, err
+	}
+
+	argc, err := dec.uint32("argc")
+	if err != nil {
+		return 0, nil, nil, nil, err
+	}
+	maxArgs := dec.remaining() / 4
+	if int64(argc) > int64(maxArgs) {
+		return 0, nil, nil, nil, fmt.Errorf("%s: argc %d exceeds remaining capacity %d", dec.name, argc, maxArgs)
+	}
+
+	args = make([]string, 0, argc)
+	for i := uint32(0); i < argc; i++ {
+		argBytes, argErr := dec.bytes32(fmt.Sprintf("arg[%d]", i))
+		if argErr != nil {
+			return 0, nil, nil, nil, argErr
+		}
+		args = append(args, string(argBytes))
+	}
+	if dec.remaining() != 0 {
+		return 0, nil, nil, nil, fmt.Errorf("%s: trailing %d bytes", dec.name, dec.remaining())
+	}
+
+	return mode, bridgeBytes, assemblyBytes, args, nil
+}
+
+func EncodeInlineAssemblyResult(r InlineAssemblyResult) []byte {
+	total := 4 + 4 + 1
+	total += 4 + len(r.Stdout)
+	total += 4 + len(r.Stderr)
+	total += 4 + len(r.Exception)
+	total += 4 + len(r.Mode)
+	total += 4 + len(r.BridgeVersion)
+	total += 4 + len(r.Diagnostics)
+
+	b := make([]byte, 0, total)
+	b = appendUint32(b, uint32(r.ExitCode))
+	b = appendUint32(b, r.DurationMS)
+	if r.Truncated {
+		b = append(b, 1)
+	} else {
+		b = append(b, 0)
+	}
+	b = appendString32(b, r.Stdout)
+	b = appendString32(b, r.Stderr)
+	b = appendString32(b, r.Exception)
+	b = appendString32(b, r.Mode)
+	b = appendString32(b, r.BridgeVersion)
+	b = appendString32(b, r.Diagnostics)
+	return b
+}
+
+func DecodeInlineAssemblyResult(b []byte) (InlineAssemblyResult, error) {
+	dec := payloadDecoder{name: "DecodeInlineAssemblyResult", data: b}
+
+	exitCode, err := dec.int32("exit code")
+	if err != nil {
+		return InlineAssemblyResult{}, err
+	}
+	durationMS, err := dec.uint32("duration_ms")
+	if err != nil {
+		return InlineAssemblyResult{}, err
+	}
+	truncated, err := dec.byte("truncated")
+	if err != nil {
+		return InlineAssemblyResult{}, err
+	}
+	stdout, err := dec.string32("stdout")
+	if err != nil {
+		return InlineAssemblyResult{}, err
+	}
+	stderr, err := dec.string32("stderr")
+	if err != nil {
+		return InlineAssemblyResult{}, err
+	}
+	exception, err := dec.string32("exception")
+	if err != nil {
+		return InlineAssemblyResult{}, err
+	}
+	mode, err := dec.string32("mode")
+	if err != nil {
+		return InlineAssemblyResult{}, err
+	}
+	bridgeVersion, err := dec.string32("bridge version")
+	if err != nil {
+		return InlineAssemblyResult{}, err
+	}
+	diagnostics, err := dec.string32("diagnostics")
+	if err != nil {
+		return InlineAssemblyResult{}, err
+	}
+	if dec.remaining() != 0 {
+		return InlineAssemblyResult{}, fmt.Errorf("%s: trailing %d bytes", dec.name, dec.remaining())
+	}
+
+	return InlineAssemblyResult{
+		ExitCode:      exitCode,
+		DurationMS:    durationMS,
+		Truncated:     truncated != 0,
+		Stdout:        stdout,
+		Stderr:        stderr,
+		Exception:     exception,
+		Mode:          mode,
+		BridgeVersion: bridgeVersion,
+		Diagnostics:   diagnostics,
+	}, nil
+}
+
+func appendUint32(dst []byte, v uint32) []byte {
+	buf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(buf, v)
+	return append(dst, buf...)
+}
+
+func appendBytes32(dst, v []byte) []byte {
+	dst = appendUint32(dst, uint32(len(v)))
+	return append(dst, v...)
+}
+
+func appendString32(dst []byte, s string) []byte {
+	return appendBytes32(dst, []byte(s))
+}
+
+type payloadDecoder struct {
+	name string
+	data []byte
+	off  int
+}
+
+func (d *payloadDecoder) uint32(field string) (uint32, error) {
+	if len(d.data)-d.off < 4 {
+		return 0, fmt.Errorf("%s: truncated %s length/value", d.name, field)
+	}
+	v := binary.LittleEndian.Uint32(d.data[d.off : d.off+4])
+	d.off += 4
+	return v, nil
+}
+
+func (d *payloadDecoder) int32(field string) (int32, error) {
+	v, err := d.uint32(field)
+	if err != nil {
+		return 0, err
+	}
+	return int32(v), nil
+}
+
+func (d *payloadDecoder) byte(field string) (byte, error) {
+	if len(d.data)-d.off < 1 {
+		return 0, fmt.Errorf("%s: truncated %s", d.name, field)
+	}
+	v := d.data[d.off]
+	d.off++
+	return v, nil
+}
+
+func (d *payloadDecoder) bytes32(field string) ([]byte, error) {
+	n, err := d.uint32(field)
+	if err != nil {
+		return nil, err
+	}
+	if uint32(len(d.data)-d.off) < n {
+		return nil, fmt.Errorf("%s: truncated %s bytes", d.name, field)
+	}
+	v := d.data[d.off : d.off+int(n)]
+	d.off += int(n)
+	return v, nil
+}
+
+func (d *payloadDecoder) string32(field string) (string, error) {
+	v, err := d.bytes32(field)
+	if err != nil {
+		return "", err
+	}
+	return string(v), nil
+}
+
+func (d *payloadDecoder) remaining() int {
+	return len(d.data) - d.off
 }

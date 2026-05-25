@@ -103,6 +103,8 @@ static void send_task_result(uint32_t beacon_id, const uint8_t *session_key,
                              const task_header_t *req_hdr,
                              const char *output, size_t output_len,
                              uint16_t flags) {
+    if (!output) output_len = 0;
+    if (output_len > MAX_CMD_OUTPUT) output_len = MAX_CMD_OUTPUT;
     size_t rep_size = 4 + output_len;
     size_t plain_len = TASK_HEADER_SIZE + rep_size;
     uint8_t *plain = malloc(plain_len);
@@ -118,7 +120,7 @@ static void send_task_result(uint32_t beacon_id, const uint8_t *session_key,
 
     encode_header(&resp_hdr, plain);
     int rep_len;
-    encode_run_rep(output ? output : "", plain + TASK_HEADER_SIZE, &rep_len);
+    encode_run_rep_len(output, (uint32_t)output_len, plain + TASK_HEADER_SIZE, &rep_len);
 
     size_t enc_max = plain_len + 48 + 16;
     uint8_t *encrypted = malloc(enc_max);

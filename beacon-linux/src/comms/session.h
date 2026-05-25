@@ -16,6 +16,10 @@ int  send_result_session(int sock, uint32_t label, uint8_t type, uint8_t code,
                          uint16_t flags, const char *output,
                          const uint8_t session_key[32]);
 
+int  send_result_session_len(int sock, uint32_t label, uint8_t type, uint8_t code,
+                             uint16_t flags, const char *output, size_t output_len,
+                             const uint8_t session_key[32]);
+
 int  send_result_raw_session(int sock, uint32_t label, uint8_t type,
                              uint16_t flags, uint32_t identifier,
                              const uint8_t *data, uint32_t data_len,

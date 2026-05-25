@@ -204,3 +204,291 @@ func TestDecodeShellInputTruncated(t *testing.T) {
 		t.Fatal("expected error for truncated input")
 	}
 }
+
+func TestInlineAssemblyConstants(t *testing.T) {
+	if TaskInlineAssembly != 15 {
+		t.Fatalf("TaskInlineAssembly = %d, want 15", TaskInlineAssembly)
+	}
+	if CodeInlineAssembly != 0 {
+		t.Fatalf("CodeInlineAssembly = %d, want 0", CodeInlineAssembly)
+	}
+	if InlineModeAuto != 0 {
+		t.Fatalf("InlineModeAuto = %d, want 0", InlineModeAuto)
+	}
+	if InlineModeBridge != 1 {
+		t.Fatalf("InlineModeBridge = %d, want 1", InlineModeBridge)
+	}
+	if InlineModeDirect != 2 {
+		t.Fatalf("InlineModeDirect = %d, want 2", InlineModeDirect)
+	}
+}
+
+func TestEncodeBOFReqFixture(t *testing.T) {
+	got := EncodeBOFReq([]byte{0x64, 0x86, 0x00}, []byte{0x03, 0x00, 0x00, 0x00, 'o', 'n', 'e'})
+	want := []byte{
+		0x03, 0x00, 0x00, 0x00, 0x64, 0x86, 0x00,
+		0x07, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 'o', 'n', 'e',
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("fixture mismatch:\n got: %v\nwant: %v", got, want)
+	}
+}
+
+func TestEncodeDecodeInlineAssemblyReq(t *testing.T) {
+	bridgeBytes := []byte{0x41, 0x42, 0x43}
+	assemblyBytes := []byte{0x90, 0xC3}
+	args := []string{"alpha", "", "sp ace", "unicode-ok"}
+
+	encoded := EncodeInlineAssemblyReq(bridgeBytes, assemblyBytes, args, InlineModeBridge)
+	mode, gotBridge, gotAssembly, gotArgs, err := DecodeInlineAssemblyReq(encoded)
+	if err != nil {
+		t.Fatalf("DecodeInlineAssemblyReq: %v", err)
+	}
+
+	if mode != InlineModeBridge {
+		t.Fatalf("mode = %d, want %d", mode, InlineModeBridge)
+	}
+	if !bytes.Equal(gotBridge, bridgeBytes) {
+		t.Fatalf("bridge bytes mismatch: got %v want %v", gotBridge, bridgeBytes)
+	}
+	if !bytes.Equal(gotAssembly, assemblyBytes) {
+		t.Fatalf("assembly bytes mismatch: got %v want %v", gotAssembly, assemblyBytes)
+	}
+	if len(gotArgs) != len(args) {
+		t.Fatalf("args len = %d, want %d", len(gotArgs), len(args))
+	}
+	for i := range args {
+		if gotArgs[i] != args[i] {
+			t.Fatalf("arg[%d] = %q, want %q", i, gotArgs[i], args[i])
+		}
+	}
+}
+
+func TestEncodeInlineAssemblyReqFixture(t *testing.T) {
+	got := EncodeInlineAssemblyReq([]byte{0xAA, 0xBB}, []byte{0xCC}, []string{"go", ""}, InlineModeDirect)
+	want := []byte{
+		0x02, 0x00, 0x00, 0x00,
+		0x02, 0x00, 0x00, 0x00, 0xAA, 0xBB,
+		0x01, 0x00, 0x00, 0x00, 0xCC,
+		0x02, 0x00, 0x00, 0x00,
+		0x02, 0x00, 0x00, 0x00, 0x67, 0x6F,
+		0x00, 0x00, 0x00, 0x00,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("fixture mismatch:\n got: %v\nwant: %v", got, want)
+	}
+}
+
+func TestEncodeInlineAssemblyBOFArgsFixture(t *testing.T) {
+	got := EncodeInlineAssemblyBOFArgs([]byte{0xAA, 0xBB}, []byte{0xCC}, []string{"go", ""})
+	want := []byte{
+		0x02, 0x00, 0x00, 0x00, 0xAA, 0xBB,
+		0x01, 0x00, 0x00, 0x00, 0xCC,
+		0x02, 0x00, 0x00, 0x00,
+		0x02, 0x00, 0x00, 0x00, 0x67, 0x6F,
+		0x00, 0x00, 0x00, 0x00,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("fixture mismatch:\n got: %v\nwant: %v", got, want)
+	}
+}
+
+func TestDecodeInlineAssemblyReqMalformed(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload []byte
+	}{
+		{
+			name:    "too short for mode",
+			payload: []byte{0x01, 0x02, 0x03},
+		},
+		{
+			name: "truncated bridge bytes",
+			payload: func() []byte {
+				b := make([]byte, 8)
+				binary.LittleEndian.PutUint32(b[:4], InlineModeDirect)
+				binary.LittleEndian.PutUint32(b[4:], 3)
+				return b
+			}(),
+		},
+		{
+			name: "truncated arg bytes",
+			payload: func() []byte {
+				b := make([]byte, 0, 24)
+				b = appendUint32LE(b, InlineModeDirect)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 1)
+				b = appendUint32LE(b, 4)
+				b = append(b, 'o', 'k')
+				return b
+			}(),
+		},
+		{
+			name: "invalid mode",
+			payload: func() []byte {
+				b := make([]byte, 0, 16)
+				b = appendUint32LE(b, 99)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 0)
+				return b
+			}(),
+		},
+		{
+			name: "argc exceeds possible remaining args",
+			payload: func() []byte {
+				b := make([]byte, 0, 20)
+				b = appendUint32LE(b, InlineModeDirect)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 0x40000000)
+				return b
+			}(),
+		},
+		{
+			name: "legacy auto mode rejected",
+			payload: func() []byte {
+				b := make([]byte, 0, 16)
+				b = appendUint32LE(b, InlineModeAuto)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 0)
+				return b
+			}(),
+		},
+		{
+			name: "trailing bytes rejected",
+			payload: func() []byte {
+				b := EncodeInlineAssemblyReq([]byte{0x01}, []byte{0x02}, []string{"x"}, InlineModeBridge)
+				return append(b, 0xFF)
+			}(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, _, err := DecodeInlineAssemblyReq(tt.payload)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func TestEncodeDecodeInlineAssemblyResult(t *testing.T) {
+	want := InlineAssemblyResult{
+		ExitCode:      -7,
+		DurationMS:    1234,
+		Truncated:     true,
+		Stdout:        "stdout text",
+		Stderr:        "stderr text",
+		Exception:     "exception text",
+		Mode:          "bridge",
+		BridgeVersion: "1.2.3",
+		Diagnostics:   "diag text",
+	}
+
+	encoded := EncodeInlineAssemblyResult(want)
+	got, err := DecodeInlineAssemblyResult(encoded)
+	if err != nil {
+		t.Fatalf("DecodeInlineAssemblyResult: %v", err)
+	}
+
+	if got != want {
+		t.Fatalf("result mismatch: got %#v want %#v", got, want)
+	}
+}
+
+func TestEncodeInlineAssemblyResultFixture(t *testing.T) {
+	got := EncodeInlineAssemblyResult(InlineAssemblyResult{
+		ExitCode:      -2,
+		DurationMS:    5,
+		Truncated:     true,
+		Stdout:        "A",
+		Stderr:        "",
+		Exception:     "B",
+		Mode:          "D",
+		BridgeVersion: "1",
+		Diagnostics:   "",
+	})
+	want := []byte{
+		0xFE, 0xFF, 0xFF, 0xFF,
+		0x05, 0x00, 0x00, 0x00,
+		0x01,
+		0x01, 0x00, 0x00, 0x00, 0x41,
+		0x00, 0x00, 0x00, 0x00,
+		0x01, 0x00, 0x00, 0x00, 0x42,
+		0x01, 0x00, 0x00, 0x00, 0x44,
+		0x01, 0x00, 0x00, 0x00, 0x31,
+		0x00, 0x00, 0x00, 0x00,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("fixture mismatch:\n got: %v\nwant: %v", got, want)
+	}
+}
+
+func TestDecodeInlineAssemblyResultMalformed(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload []byte
+	}{
+		{
+			name:    "too short for header",
+			payload: make([]byte, 8),
+		},
+		{
+			name: "truncated stdout bytes",
+			payload: func() []byte {
+				b := make([]byte, 0, 32)
+				b = appendInt32LE(b, 0)
+				b = appendUint32LE(b, 10)
+				b = append(b, 0)
+				b = appendUint32LE(b, 5)
+				b = append(b, 'o', 'k')
+				return b
+			}(),
+		},
+		{
+			name: "missing trailing diagnostics length",
+			payload: func() []byte {
+				b := make([]byte, 0, 64)
+				b = appendInt32LE(b, 1)
+				b = appendUint32LE(b, 20)
+				b = append(b, 1)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 0)
+				b = appendUint32LE(b, 0)
+				return b
+			}(),
+		},
+		{
+			name: "trailing bytes rejected",
+			payload: func() []byte {
+				b := EncodeInlineAssemblyResult(InlineAssemblyResult{})
+				return append(b, 0xEE)
+			}(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := DecodeInlineAssemblyResult(tt.payload)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func appendUint32LE(dst []byte, v uint32) []byte {
+	buf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(buf, v)
+	return append(dst, buf...)
+}
+
+func appendInt32LE(dst []byte, v int32) []byte {
+	return appendUint32LE(dst, uint32(v))
+}

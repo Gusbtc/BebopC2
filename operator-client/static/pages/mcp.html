@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MCP</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <span class="logo">BEBOP // C2</span>
+        <nav>
+            <a href="/sessions">Sessions</a>
+            <a href="/listeners">Listeners</a>
+            <a href="/build">Build</a>
+            <a href="/mcp" class="active">MCP</a>
+        </nav>
+        <div class="conn-indicator">
+            <span class="conn-dot" id="conn-dot"></span>
+            <span id="conn-status">OFFLINE</span>
+        </div>
+        <div class="header-actions">
+            <button type="button" class="icon-btn" onclick="openSettings()" title="Teamserver connection">
+                <svg class="icon-btn-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span class="icon-btn-text">settings</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="mcp-main">
+        <div class="mcp-page-header">
+            <h2>MCP Server</h2>
+            <button class="mcp-refresh-btn" type="button" onclick="loadMCPPanel('mcp-page-body')">Refresh</button>
+        </div>
+        <div id="mcp-page-body" class="mcp-page-body">
+            <div class="mcp-panel">
+                <div class="event-log-empty">mcp status unavailable</div>
+            </div>
+        </div>
+    </main>
+
+    <div id="toast-container"></div>
+
+    <script src="/static/js/app/core.js"></script>
+    <script src="/static/js/app/views.js"></script>
+    <script src="/static/js/app/terminal.js"></script>
+    <script src="/static/js/app/filebrowser.js"></script>
+    <script src="/static/js/app/websocket.js"></script>
+    <script>
+        if (checkAuth()) {
+            initSettings();
+            loadMCPPanel('mcp-page-body');
+        }
+    </script>
+</body>
+</html>

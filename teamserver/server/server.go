@@ -5,6 +5,8 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -45,8 +47,17 @@ func Run(port int, host string, s *store.Store, privKey *rsa.PrivateKey, beaconS
 	// Auth routes
 	mux.HandleFunc("POST /api/auth/login", cors(h.HandleLogin))
 	mux.HandleFunc("POST /api/auth/logout", cors(h.authMiddleware(h.HandleLogout)))
+	mux.HandleFunc("POST /api/ws-ticket", cors(h.authMiddleware(h.HandleWSTicket)))
 	mux.HandleFunc("OPTIONS /api/auth/login", cors(func(w http.ResponseWriter, r *http.Request) {}))
 	mux.HandleFunc("OPTIONS /api/auth/logout", cors(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.HandleFunc("OPTIONS /api/ws-ticket", cors(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.HandleFunc("GET /api/mcp/status", cors(h.authMiddleware(h.HandleMCPStatus)))
+	mux.HandleFunc("GET /api/mcp/token", cors(h.authMiddleware(h.HandleMCPToken)))
+	mux.HandleFunc("GET /api/mcp", cors(h.mcpHTTPAuthMiddleware(h.HandleMCPStream)))
+	mux.HandleFunc("POST /api/mcp", cors(h.mcpHTTPAuthMiddleware(h.HandleMCPRPC)))
+	mux.HandleFunc("OPTIONS /api/mcp/status", cors(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.HandleFunc("OPTIONS /api/mcp/token", cors(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.HandleFunc("OPTIONS /api/mcp", cors(func(w http.ResponseWriter, r *http.Request) {}))
 
 	// Operator JSON API routes (CORS enabled)
 	mux.HandleFunc("GET /api/sessions", cors(h.authMiddleware(h.HandleGetSessions)))
@@ -72,6 +83,11 @@ func Run(port int, host string, s *store.Store, privKey *rsa.PrivateKey, beaconS
 	mux.HandleFunc("GET /api/events", cors(h.authMiddleware(h.HandleGetEvents)))
 	mux.HandleFunc("POST /api/events", cors(h.authMiddleware(h.HandlePostEvent)))
 	mux.HandleFunc("OPTIONS /api/events", cors(func(w http.ResponseWriter, r *http.Request) {}))
+
+	// Operator chat routes
+	mux.HandleFunc("GET /api/chat", cors(h.authMiddleware(h.HandleChatList)))
+	mux.HandleFunc("POST /api/chat", cors(h.authMiddleware(h.HandleChatPost)))
+	mux.HandleFunc("OPTIONS /api/chat", cors(func(w http.ResponseWriter, r *http.Request) {}))
 
 	// Terminal state routes
 	mux.HandleFunc("GET /api/terminal/{id}", cors(h.authMiddleware(h.HandleGetTerminal)))
@@ -102,6 +118,10 @@ func Run(port int, host string, s *store.Store, privKey *rsa.PrivateKey, beaconS
 	// Execute-assembly routes
 	mux.HandleFunc("POST /api/exec-assembly", cors(h.authMiddleware(h.HandleExecAssembly)))
 	mux.HandleFunc("OPTIONS /api/exec-assembly", cors(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.HandleFunc("POST /api/inline-assembly", cors(h.authMiddleware(h.HandleInlineAssembly)))
+	mux.HandleFunc("OPTIONS /api/inline-assembly", cors(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.HandleFunc("POST /api/bof", cors(h.authMiddleware(h.HandleBOF)))
+	mux.HandleFunc("OPTIONS /api/bof", cors(func(w http.ResponseWriter, r *http.Request) {}))
 
 	// Assembly library routes
 	mux.HandleFunc("POST /api/assemblies", cors(h.authMiddleware(h.HandleAssemblyUpload)))
@@ -109,6 +129,11 @@ func Run(port int, host string, s *store.Store, privKey *rsa.PrivateKey, beaconS
 	mux.HandleFunc("DELETE /api/assemblies/{name}", cors(h.authMiddleware(h.HandleAssemblyDelete)))
 	mux.HandleFunc("OPTIONS /api/assemblies", cors(func(w http.ResponseWriter, r *http.Request) {}))
 	mux.HandleFunc("OPTIONS /api/assemblies/{name}", cors(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.HandleFunc("POST /api/library", cors(h.authMiddleware(h.HandleLibraryUpload)))
+	mux.HandleFunc("GET /api/library", cors(h.authMiddleware(h.HandleLibraryList)))
+	mux.HandleFunc("DELETE /api/library/{name}", cors(h.authMiddleware(h.HandleLibraryDelete)))
+	mux.HandleFunc("OPTIONS /api/library", cors(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.HandleFunc("OPTIONS /api/library/{name}", cors(func(w http.ResponseWriter, r *http.Request) {}))
 
 	// WebSocket for session results
 	if sl != nil {
@@ -152,29 +177,71 @@ type contextKey string
 
 const operatorKey contextKey = "operator"
 
+func validateMCPToken(raw string) (mcpAuthContext, bool) {
+	configured := configuredMCPAuth()
+	raw = strings.TrimSpace(raw)
+	if configured.Secret == "" || raw == "" {
+		return mcpAuthContext{}, false
+	}
+	if operator, ok := parseMCPOperatorToken(raw, configured.Secret); ok {
+		return mcpAuthContext{Operator: operator, Scopes: configured.Scopes}, true
+	}
+	return mcpAuthContext{}, false
+}
+
+func mcpMutationAllowed() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("BEBOP_MCP_ALLOW_MUTATION")))
+	switch value {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+func bearerToken(r *http.Request) string {
+	token := r.Header.Get("Authorization")
+	if !strings.HasPrefix(token, "Bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(token[7:])
+}
+
 func (h *Handler) validateWSToken(w http.ResponseWriter, r *http.Request) (string, bool) {
-	token := r.URL.Query().Get("token")
-	if token == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return "", false
+	if username, ok := h.consumeWSTicket(r.URL.Query().Get("ticket")); ok {
+		return username, true
 	}
-	username, err := auth.ValidateToken(token, h.jwtKey)
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return "", false
+	if legacyWSQueryTokenAllowed() {
+		token := r.URL.Query().Get("token")
+		if token != "" {
+			username, err := auth.ValidateToken(token, h.jwtKey)
+			if err == nil {
+				return username, true
+			}
+		}
 	}
-	return username, true
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	return "", false
+}
+
+func legacyWSQueryTokenAllowed() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("BEBOP_WS_LEGACY_QUERY_TOKEN")))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := r.Header.Get("Authorization")
-		if !strings.HasPrefix(token, "Bearer ") {
+		raw := bearerToken(r)
+		if raw == "" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		username, err := auth.ValidateToken(token[7:], h.jwtKey)
+		username, err := auth.ValidateToken(raw, h.jwtKey)
 		if err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if !h.operatorExists(username) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -183,17 +250,132 @@ func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func (h *Handler) mcpHTTPAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		raw := bearerToken(r)
+		if raw == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if authCtx, ok := validateMCPToken(raw); ok {
+			if !h.operatorExists(authCtx.Operator) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			ctx := context.WithValue(r.Context(), operatorKey, authCtx.Operator)
+			ctx = context.WithValue(ctx, mcpAuthKey, authCtx)
+			next(w, r.WithContext(ctx))
+			return
+		}
+		username, err := auth.ValidateToken(raw, h.jwtKey)
+		if err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if !h.operatorExists(username) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), operatorKey, username)
+		next(w, r.WithContext(ctx))
+	}
+}
+
+func (h *Handler) operatorExists(username string) bool {
+	if h == nil || h.authSvc == nil {
+		return true
+	}
+	username = strings.TrimSpace(username)
+	return username != "" && h.authSvc.OperatorExists(username)
+}
+
 func cors(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if allowedOrigin(origin) {
+			if origin == "" {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			} else {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Add("Vary", "Origin")
+			}
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, MCP-Protocol-Version, Mcp-Session-Id")
 		if r.Method == http.MethodOptions {
+			if origin != "" && !allowedOrigin(origin) {
+				http.Error(w, "origin not allowed", http.StatusForbidden)
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		next(w, r)
 	}
+}
+
+func configuredOrigins() []string {
+	raw := strings.TrimSpace(os.Getenv("BEBOP_ALLOWED_ORIGINS"))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func allowedOrigin(origin string) bool {
+	allowed := configuredOrigins()
+	if len(allowed) == 0 {
+		return true
+	}
+	if origin == "" {
+		return true
+	}
+	for _, candidate := range allowed {
+		if candidate == "*" || candidate == origin {
+			return true
+		}
+	}
+	return false
+}
+
+func acceptOperatorWebSocket(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
+	allowed := configuredOrigins()
+	opts := &websocket.AcceptOptions{}
+	if len(allowed) == 0 || (len(allowed) == 1 && allowed[0] == "*") {
+		opts.InsecureSkipVerify = true
+	} else {
+		opts.OriginPatterns = webSocketOriginPatterns(allowed)
+	}
+	return websocket.Accept(w, r, opts)
+}
+
+func webSocketOriginPatterns(allowed []string) []string {
+	out := make([]string, 0, len(allowed))
+	for _, candidate := range allowed {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if candidate == "*" {
+			out = append(out, candidate)
+			continue
+		}
+		if parsed, err := url.Parse(candidate); err == nil && parsed.Host != "" &&
+			(parsed.Scheme == "http" || parsed.Scheme == "https") {
+			out = append(out, parsed.Host)
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
 }
 
 func handleSessionWebSocket(w http.ResponseWriter, r *http.Request, sl *SessionListener) {
@@ -206,9 +388,7 @@ func handleSessionWebSocket(w http.ResponseWriter, r *http.Request, sl *SessionL
 	}
 	beaconID := uint32(id64)
 
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
-	})
+	conn, err := acceptOperatorWebSocket(w, r)
 	if err != nil {
 		return
 	}

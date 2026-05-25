@@ -487,7 +487,7 @@ static int builtin_ps(char *buf, int buf_size) {
             }
         }
         if (e.cmdline[0] == '\0') {
-            snprintf(e.cmdline, sizeof(e.cmdline), "[%s]", e.comm);
+            snprintf(e.cmdline, sizeof(e.cmdline), "[%.*s]", (int)sizeof(e.cmdline) - 3, e.comm);
         }
         if (e.state == '\0') e.state = '?';
 
@@ -1149,6 +1149,43 @@ static void hex_ip_to_str(const char *hex, char *out) {
     snprintf(out, 16, "%d.%d.%d.%d", a, b, c, d);
 }
 
+static int hex_pair_to_byte(char hi, char lo, unsigned char *out) {
+    int h = (hi >= '0' && hi <= '9') ? hi - '0' :
+            (hi >= 'a' && hi <= 'f') ? hi - 'a' + 10 :
+            (hi >= 'A' && hi <= 'F') ? hi - 'A' + 10 : -1;
+    int l = (lo >= '0' && lo <= '9') ? lo - '0' :
+            (lo >= 'a' && lo <= 'f') ? lo - 'a' + 10 :
+            (lo >= 'A' && lo <= 'F') ? lo - 'A' + 10 : -1;
+    if (h < 0 || l < 0) return 0;
+    *out = (unsigned char)((h << 4) | l);
+    return 1;
+}
+
+static void hex_ip6_to_str(const char *hex, char *out, size_t out_size) {
+    unsigned char addr[16];
+    if (!hex || strlen(hex) < 32 || out_size == 0) {
+        if (out_size > 0) {
+            strncpy(out, "?", out_size - 1);
+            out[out_size - 1] = '\0';
+        }
+        return;
+    }
+    for (int block = 0; block < 4; block++) {
+        for (int byte = 0; byte < 4; byte++) {
+            int src = (block * 8) + ((3 - byte) * 2);
+            if (!hex_pair_to_byte(hex[src], hex[src + 1], &addr[(block * 4) + byte])) {
+                strncpy(out, "?", out_size - 1);
+                out[out_size - 1] = '\0';
+                return;
+            }
+        }
+    }
+    if (!inet_ntop(AF_INET6, addr, out, (socklen_t)out_size)) {
+        strncpy(out, "?", out_size - 1);
+        out[out_size - 1] = '\0';
+    }
+}
+
 static int find_pid_for_inode(unsigned long inode) {
     if (getuid() != 0) return -1;
 
@@ -1207,11 +1244,13 @@ static void get_comm(int pid, char *out, int out_size) {
     xor_dec(comm_fmt, ENC_LX_PROC_PID_COMM, ENC_LX_PROC_PID_COMM_LEN);
     char path[64];
     snprintf(path, sizeof(path), comm_fmt, pid);
-    if (read_small_file(path, out, out_size) <= 0)
+    if (read_small_file(path, out, out_size) <= 0 && out_size > 0) {
         strncpy(out, "?", (size_t)(out_size - 1));
+        out[out_size - 1] = '\0';
+    }
 }
 
-static int parse_net_file(const char *proto, const char *netfile,
+static int parse_net_file(const char *proto, const char *netfile, int is_ipv6,
                            char *buf, int buf_size, int pos) {
     int fd = open(netfile, O_RDONLY);
     if (fd < 0) return pos;
@@ -1229,12 +1268,12 @@ static int parse_net_file(const char *proto, const char *netfile,
         if (nl) *nl = '\0';
         if (first_line) { first_line = 0; line = nl ? nl + 1 : NULL; continue; }
 
-        char sl[16], local[32], rem[32], state_hex[8];
+        char sl[16], local[80], rem[80], state_hex[8];
         char unused1[32], unused2[16], unused3[16], unused4[16];
         char uid_str[16], unused5[16], inode_str[32];
 
         int fields = sscanf(line,
-            "%15s %31s %31s %7s %31s %15s %15s %15s %15s %15s %31s",
+            "%15s %79s %79s %7s %31s %15s %15s %15s %15s %15s %31s",
             sl, local, rem, state_hex,
             unused1, unused2, unused3, unused4,
             uid_str, unused5, inode_str);
@@ -1242,19 +1281,21 @@ static int parse_net_file(const char *proto, const char *netfile,
         if (fields < 11) { line = nl ? nl + 1 : NULL; continue; }
 
         char *colon_l = strchr(local, ':');
-        char local_ip[20] = "?", local_port_str[8] = "?";
+        char local_ip[INET6_ADDRSTRLEN] = "?", local_port_str[16] = "?";
         if (colon_l) {
             *colon_l = '\0';
-            hex_ip_to_str(local, local_ip);
+            if (is_ipv6) hex_ip6_to_str(local, local_ip, sizeof(local_ip));
+            else hex_ip_to_str(local, local_ip);
             unsigned int lp = (unsigned int)strtoul(colon_l + 1, NULL, 16);
             snprintf(local_port_str, sizeof(local_port_str), "%u", lp);
         }
 
         char *colon_r = strchr(rem, ':');
-        char rem_ip[20] = "?", rem_port_str[8] = "*";
+        char rem_ip[INET6_ADDRSTRLEN] = "?", rem_port_str[16] = "*";
         if (colon_r) {
             *colon_r = '\0';
-            hex_ip_to_str(rem, rem_ip);
+            if (is_ipv6) hex_ip6_to_str(rem, rem_ip, sizeof(rem_ip));
+            else hex_ip_to_str(rem, rem_ip);
             unsigned int rp = (unsigned int)strtoul(colon_r + 1, NULL, 16);
             if (rp == 0) strncpy(rem_port_str, "*", sizeof(rem_port_str) - 1);
             else snprintf(rem_port_str, sizeof(rem_port_str), "%u", rp);
@@ -1268,17 +1309,17 @@ static int parse_net_file(const char *proto, const char *netfile,
         char pname[32] = "-";
         if (owner_pid > 0) get_comm(owner_pid, pname, sizeof(pname));
 
-        char local_full[28], rem_full[28];
+        char local_full[72], rem_full[72];
         snprintf(local_full, sizeof(local_full), "%s:%s", local_ip, local_port_str);
         snprintf(rem_full,   sizeof(rem_full),   "%s:%s", rem_ip,   rem_port_str);
 
         if (owner_pid > 0)
             pos = out_append(buf, buf_size, pos,
-                "%-5s  %-22s %-22s %-13s %-6d %s\n",
+                "%-5s  %-39s %-39s %-13s %-6d %s\n",
                 proto, local_full, rem_full, state_name, owner_pid, pname);
         else
             pos = out_append(buf, buf_size, pos,
-                "%-5s  %-22s %-22s %-13s %-6s %s\n",
+                "%-5s  %-39s %-39s %-13s %-6s %s\n",
                 proto, local_full, rem_full, state_name, "-", pname);
 
         line = nl ? nl + 1 : NULL;
@@ -1303,7 +1344,7 @@ static int builtin_netstat(char *buf, int buf_size) {
     xor_dec(h_proc, ENC_LX_NETSTAT_PROC, ENC_LX_NETSTAT_PROC_LEN);
 
     pos = out_append(buf, buf_size, pos,
-        "%-5s  %-22s %-22s %-13s %-6s %s\n",
+        "%-5s  %-39s %-39s %-13s %-6s %s\n",
         h_proto, h_local, h_remote, h_state, h_pid, h_proc);
 
     char p_tcp[ENC_LX_PROTO_TCP_LEN + 1];
@@ -1324,10 +1365,10 @@ static int builtin_netstat(char *buf, int buf_size) {
     char f_udp6[ENC_LX_PROC_NET_UDP6_LEN + 1];
     xor_dec(f_udp6, ENC_LX_PROC_NET_UDP6, ENC_LX_PROC_NET_UDP6_LEN);
 
-    pos = parse_net_file(p_tcp,  f_tcp,  buf, buf_size, pos);
-    pos = parse_net_file(p_tcp6, f_tcp6, buf, buf_size, pos);
-    pos = parse_net_file(p_udp,  f_udp,  buf, buf_size, pos);
-    pos = parse_net_file(p_udp6, f_udp6, buf, buf_size, pos);
+    pos = parse_net_file(p_tcp,  f_tcp,  0, buf, buf_size, pos);
+    pos = parse_net_file(p_tcp6, f_tcp6, 1, buf, buf_size, pos);
+    pos = parse_net_file(p_udp,  f_udp,  0, buf, buf_size, pos);
+    pos = parse_net_file(p_udp6, f_udp6, 1, buf, buf_size, pos);
     return pos;
 }
 

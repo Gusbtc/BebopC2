@@ -7,13 +7,11 @@
 #include <windns.h>
 #include <lm.h>
 #include <winsvc.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include "builtin.h"
 #include "obf.h"
 #include "obf_strings.h"
 #include "../../include/dynapi.h"
+#include "../../include/mini_std.h"
 
 /* ------------------------------------------------------------------ */
 /* ls / dir                                                             */

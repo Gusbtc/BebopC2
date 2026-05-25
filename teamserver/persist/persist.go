@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -105,7 +106,15 @@ func (p *Persister) HasSession() bool {
 func (p *Persister) ReadMeta() (Meta, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.readMetaLocked()
+	meta, err := p.readMetaLocked()
+	if err == nil {
+		return meta, nil
+	}
+	rebuilt, rebuildErr := p.rebuildMetaLocked()
+	if rebuildErr != nil {
+		return Meta{SavedAt: time.Now()}, nil
+	}
+	return rebuilt, nil
 }
 
 // readMetaLocked reads meta.json; caller must hold p.mu.
@@ -118,27 +127,98 @@ func (p *Persister) readMetaLocked() (Meta, error) {
 	return m, json.Unmarshal(data, &m)
 }
 
+func (p *Persister) rebuildMetaLocked() (Meta, error) {
+	meta := Meta{SavedAt: time.Now()}
+
+	type listenersFile []*models.Listener
+	type beaconsFile []*models.Beacon
+	type lootFile []*models.ExfilEntry
+	type terminalsFile map[string]*models.TerminalState
+
+	loadJSON := func(name string, out any) error {
+		data, err := os.ReadFile(filepath.Join(p.dir, name))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if len(data) == 0 {
+			return nil
+		}
+		return json.Unmarshal(data, out)
+	}
+
+	var listeners listenersFile
+	if err := loadJSON("listeners.json", &listeners); err != nil {
+		return Meta{}, err
+	}
+	meta.Listeners = len(listeners)
+
+	var beacons beaconsFile
+	if err := loadJSON("beacons.json", &beacons); err != nil {
+		return Meta{}, err
+	}
+	meta.Beacons = len(beacons)
+
+	var loot lootFile
+	if err := loadJSON("loot.json", &loot); err != nil {
+		return Meta{}, err
+	}
+	meta.Loot = len(loot)
+
+	var terminals terminalsFile
+	if err := loadJSON("terminals.json", &terminals); err != nil {
+		return Meta{}, err
+	}
+	meta.Terminals = len(terminals)
+
+	if err := p.writeJSON("meta.json", meta, 0600); err != nil {
+		return Meta{}, err
+	}
+	return meta, nil
+}
+
 // Load reads all four state files and returns a Session.
 // rsa.pem is required; missing JSON files are treated as empty.
 func (p *Persister) Load() (*Session, error) {
 	sess := &Session{}
 
-	if data, err := os.ReadFile(filepath.Join(p.dir, "listeners.json")); err == nil {
-		if err := json.Unmarshal(data, &sess.Listeners); err != nil {
-			return nil, fmt.Errorf("parse listeners.json: %w", err)
+	loadJSON := func(name string, out any) error {
+		data, err := os.ReadFile(filepath.Join(p.dir, name))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
 		}
+		if len(data) == 0 {
+			return nil
+		}
+		if err := json.Unmarshal(data, out); err != nil {
+			var syntaxErr *json.SyntaxError
+			var typeErr *json.UnmarshalTypeError
+			if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) {
+				ui.Errorf("persist", "%s corrupt, ignoring saved copy: %v", name, err)
+				return nil
+			}
+			return fmt.Errorf("parse %s: %w", name, err)
+		}
+		return nil
 	}
 
-	if data, err := os.ReadFile(filepath.Join(p.dir, "beacons.json")); err == nil {
-		if err := json.Unmarshal(data, &sess.Beacons); err != nil {
-			return nil, fmt.Errorf("parse beacons.json: %w", err)
-		}
+	if err := loadJSON("listeners.json", &sess.Listeners); err != nil {
+		return nil, err
 	}
 
-	if data, err := os.ReadFile(filepath.Join(p.dir, "terminals.json")); err == nil {
+	if err := loadJSON("beacons.json", &sess.Beacons); err != nil {
+		return nil, err
+	}
+
+	{
 		var raw map[string]*models.TerminalState
-		if err := json.Unmarshal(data, &raw); err != nil {
-			return nil, fmt.Errorf("parse terminals.json: %w", err)
+		if err := loadJSON("terminals.json", &raw); err != nil {
+			return nil, err
 		}
 		sess.Terminals = make(map[uint32]*models.TerminalState, len(raw))
 		for k, v := range raw {
@@ -149,16 +229,12 @@ func (p *Persister) Load() (*Session, error) {
 		}
 	}
 
-	if data, err := os.ReadFile(filepath.Join(p.dir, "loot.json")); err == nil {
-		if err := json.Unmarshal(data, &sess.ExfilFiles); err != nil {
-			return nil, fmt.Errorf("parse loot.json: %w", err)
-		}
+	if err := loadJSON("loot.json", &sess.ExfilFiles); err != nil {
+		return nil, err
 	}
 
-	if data, err := os.ReadFile(filepath.Join(p.dir, "events.json")); err == nil {
-		if err := json.Unmarshal(data, &sess.Events); err != nil {
-			return nil, fmt.Errorf("parse events.json: %w", err)
-		}
+	if err := loadJSON("events.json", &sess.Events); err != nil {
+		return nil, err
 	}
 
 	data, err := os.ReadFile(filepath.Join(p.dir, "rsa.pem"))

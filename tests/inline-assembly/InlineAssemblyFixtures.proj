@@ -1,0 +1,15 @@
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <OutDir Condition="'$(OutDir)' == ''">bin\</OutDir>
+    <CscPath Condition="'$(CscPath)' == ''">csc</CscPath>
+  </PropertyGroup>
+
+  <Target Name="Build">
+    <MakeDir Directories="$(OutDir)" />
+    <Exec Command="&quot;$(CscPath)&quot; /nologo /target:exe /out:$(OutDir)MainNoArgs.exe MainNoArgs.cs" />
+    <Exec Command="&quot;$(CscPath)&quot; /nologo /target:exe /out:$(OutDir)MainArgs.exe MainArgs.cs" />
+    <Exec Command="&quot;$(CscPath)&quot; /nologo /target:exe /out:$(OutDir)StdErr.exe StdErr.cs" />
+    <Exec Command="&quot;$(CscPath)&quot; /nologo /target:exe /out:$(OutDir)Throws.exe Throws.cs" />
+    <Exec Command="&quot;$(CscPath)&quot; /nologo /target:exe /out:$(OutDir)LargeOutput.exe LargeOutput.cs" />
+  </Target>
+</Project>

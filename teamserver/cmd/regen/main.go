@@ -22,7 +22,7 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("api_hashes.h generated")
-	if err := obfgen.Generate(host, outDir); err != nil {
+	if err := obfgen.Generate(host, outDir, "windows"); err != nil {
 		fmt.Fprintf(os.Stderr, "obfgen: %v\n", err)
 		os.Exit(1)
 	}

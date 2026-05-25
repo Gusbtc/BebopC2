@@ -1,0 +1,317 @@
+[
+  {
+    "name": "ldapsearch",
+    "file": "ldapsearch.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Run LDAP queries from the target context",
+    "usage": "ldapsearch [filter] [attributes]",
+    "tags": ["domain", "ldap"]
+  },
+  {
+    "name": "adcs_enum",
+    "file": "adcs_enum.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate ADCS certificate services and templates",
+    "usage": "adcs_enum [args]",
+    "tags": ["domain", "adcs"]
+  },
+  {
+    "name": "password-policy",
+    "file": "password-policy.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Read domain or server password policy",
+    "usage": "password-policy [server]",
+    "tags": ["domain", "policy"]
+  },
+  {
+    "name": "local-sessions",
+    "file": "local-sessions.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate local logon sessions",
+    "usage": "local-sessions [args]",
+    "tags": ["host", "sessions"]
+  },
+  {
+    "name": "net-shares",
+    "file": "net-shares.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate network shares",
+    "usage": "net-shares [target]",
+    "tags": ["host", "shares"]
+  },
+  {
+    "name": "regsession",
+    "file": "regsession.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate sessions from HKU registry hives",
+    "usage": "regsession [host]",
+    "tags": ["host", "sessions"]
+  },
+  {
+    "name": "netloggedon",
+    "file": "netloggedon.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate logged-on users with NetWkstaUserEnum",
+    "usage": "netloggedon [host]",
+    "tags": ["host", "sessions"]
+  },
+  {
+    "name": "schtasks-enum",
+    "file": "schtasks-enum.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate scheduled tasks",
+    "usage": "schtasks-enum [args]",
+    "tags": ["host", "scheduled-tasks"]
+  },
+  {
+    "name": "xpipe",
+    "file": "xpipe.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "List named pipes or inspect one pipe DACL",
+    "usage": "xpipe [\\\\.\\pipe\\name]",
+    "tags": ["host", "pipes"]
+  },
+  {
+    "name": "msi-search",
+    "file": "msi-search.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Identify cached MSI installer metadata",
+    "usage": "msi-search",
+    "tags": ["host", "privesc"]
+  },
+  {
+    "name": "safe-harbor",
+    "file": "safe-harbor.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate process traits useful for target selection",
+    "usage": "safe-harbor",
+    "tags": ["host", "process"]
+  },
+  {
+    "name": "priv-always-install-elevated",
+    "file": "priv-always-install-elevated.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Check AlwaysInstallElevated registry policy",
+    "usage": "priv-always-install-elevated",
+    "tags": ["host", "privesc"]
+  },
+  {
+    "name": "priv-autologon",
+    "file": "priv-autologon.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Check Winlogon AutoLogon registry values",
+    "usage": "priv-autologon",
+    "tags": ["host", "privesc"]
+  },
+  {
+    "name": "priv-credential-manager",
+    "file": "priv-credential-manager.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate current user's Credential Manager entries",
+    "usage": "priv-credential-manager",
+    "tags": ["host", "credentials"]
+  },
+  {
+    "name": "priv-hijackable-path",
+    "file": "priv-hijackable-path.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Find writable directories in PATH",
+    "usage": "priv-hijackable-path",
+    "tags": ["host", "privesc"]
+  },
+  {
+    "name": "priv-modifiable-autorun",
+    "file": "priv-modifiable-autorun.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Find writable autorun executables",
+    "usage": "priv-modifiable-autorun",
+    "tags": ["host", "privesc"]
+  },
+  {
+    "name": "priv-modifiable-service",
+    "file": "priv-modifiable-service.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Find services with modifiable permissions",
+    "usage": "priv-modifiable-service",
+    "tags": ["host", "services", "privesc"]
+  },
+  {
+    "name": "priv-powershell-history",
+    "file": "priv-powershell-history.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Check PowerShell PSReadLine history location",
+    "usage": "priv-powershell-history",
+    "tags": ["host", "privesc"]
+  },
+  {
+    "name": "priv-token-privileges",
+    "file": "priv-token-privileges.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate current token privileges",
+    "usage": "priv-token-privileges",
+    "tags": ["host", "token"]
+  },
+  {
+    "name": "priv-uac-status",
+    "file": "priv-uac-status.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Check UAC status and current integrity",
+    "usage": "priv-uac-status",
+    "tags": ["host", "uac"]
+  },
+  {
+    "name": "priv-unquoted-service-path",
+    "file": "priv-unquoted-service-path.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Detect unquoted service paths",
+    "usage": "priv-unquoted-service-path",
+    "tags": ["host", "services", "privesc"]
+  },
+  {
+    "name": "sql-1434udp",
+    "file": "sql-1434udp.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate SQL Browser service information",
+    "usage": "sql-1434udp <server-ip>",
+    "tags": ["sql", "network"]
+  },
+  {
+    "name": "sql-info",
+    "file": "sql-info.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Gather SQL Server information",
+    "usage": "sql-info <server> [database]",
+    "tags": ["sql", "enum"]
+  },
+  {
+    "name": "sql-whoami",
+    "file": "sql-whoami.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Show SQL login, mapped user, and roles",
+    "usage": "sql-whoami <server> [database] [linkedserver] [impersonate]",
+    "tags": ["sql", "enum"]
+  },
+  {
+    "name": "sql-impersonate",
+    "file": "sql-impersonate.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate SQL users that can be impersonated",
+    "usage": "sql-impersonate <server> [database]",
+    "tags": ["sql", "enum"]
+  },
+  {
+    "name": "sql-links",
+    "file": "sql-links.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate SQL linked servers",
+    "usage": "sql-links <server> [database] [linkedserver] [impersonate]",
+    "tags": ["sql", "enum"]
+  },
+  {
+    "name": "sql-users",
+    "file": "sql-users.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate database users",
+    "usage": "sql-users <server> [database] [linkedserver] [impersonate]",
+    "tags": ["sql", "enum"]
+  },
+  {
+    "name": "sql-databases",
+    "file": "sql-databases.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate SQL databases",
+    "usage": "sql-databases <server> [database] [linkedserver] [impersonate]",
+    "tags": ["sql", "enum"]
+  },
+  {
+    "name": "sql-tables",
+    "file": "sql-tables.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate SQL tables",
+    "usage": "sql-tables <server> [database] [linkedserver] [impersonate]",
+    "tags": ["sql", "enum"]
+  },
+  {
+    "name": "sql-columns",
+    "file": "sql-columns.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate SQL table columns",
+    "usage": "sql-columns <server> <table> [database] [linkedserver] [impersonate]",
+    "tags": ["sql", "enum"]
+  },
+  {
+    "name": "sql-rows",
+    "file": "sql-rows.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Count rows in a SQL table",
+    "usage": "sql-rows <server> <table> [database] [linkedserver] [impersonate]",
+    "tags": ["sql", "enum"]
+  },
+  {
+    "name": "sql-search",
+    "file": "sql-search.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Search SQL column names",
+    "usage": "sql-search <server> <keyword> [database] [linkedserver] [impersonate]",
+    "tags": ["sql", "enum"]
+  },
+  {
+    "name": "sql-query",
+    "file": "sql-query.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Execute an operator-provided SQL query",
+    "usage": "sql-query <server> <query> [database] [linkedserver] [impersonate]",
+    "tags": ["sql", "query"]
+  },
+  {
+    "name": "sql-agentstatus",
+    "file": "sql-agentstatus.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate SQL Agent status and jobs",
+    "usage": "sql-agentstatus <server> [database] [linkedserver] [impersonate]",
+    "tags": ["sql", "enum"]
+  },
+  {
+    "name": "sql-checkrpc",
+    "file": "sql-checkrpc.x64.o",
+    "kind": "bof",
+    "source": "builtin",
+    "description": "Enumerate RPC status on linked SQL servers",
+    "usage": "sql-checkrpc <server> [database] [linkedserver] [impersonate]",
+    "tags": ["sql", "enum"]
+  }
+]

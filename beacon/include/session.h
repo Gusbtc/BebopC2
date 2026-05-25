@@ -19,6 +19,10 @@ int safe_session_write(SOCKET sock, const uint8_t *data, int len);
 int send_result_session(SOCKET sock, uint32_t label, uint8_t type, uint8_t code,
                         uint16_t flags, const char *output,
                         uint8_t *session_key);
+int send_result_session_len(SOCKET sock, uint32_t label, uint8_t type,
+                            uint8_t code, uint16_t flags,
+                            const char *output, uint32_t output_len,
+                            uint8_t *session_key);
 
 /* send_result_raw_session: builds header+raw data, encrypts, sends via TCP. */
 int send_result_raw_session(SOCKET sock, uint32_t label, uint8_t type,

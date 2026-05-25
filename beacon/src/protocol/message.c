@@ -1,6 +1,6 @@
-#include <string.h>
 #include <stdint.h>
 #include "protocol.h"
+#include "mini_std.h"
 
 static void put_u16(uint8_t *b, uint16_t v) {
     b[0] = (uint8_t)(v & 0xFF);

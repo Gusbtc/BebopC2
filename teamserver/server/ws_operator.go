@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"nhooyr.io/websocket"
 
@@ -26,9 +25,7 @@ func handleOperatorWebSocket(hub *Hub, s *store.Store, h *Handler) http.HandlerF
 		if !ok {
 			return
 		}
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			InsecureSkipVerify: true,
-		})
+		conn, err := acceptOperatorWebSocket(w, r)
 		if err != nil {
 			return
 		}
@@ -46,6 +43,7 @@ func handleOperatorWebSocket(hub *Hub, s *store.Store, h *Handler) http.HandlerF
 			{Topic: "listeners", Action: "sync", Data: s.ListListeners()},
 			{Topic: "events", Action: "sync", Data: s.ListEvents()},
 			{Topic: "loot", Action: "sync", Data: s.ListExfilFiles()},
+			{Topic: "library", Action: "sync", Data: h.ListLibraryFiles()},
 			{Topic: "chat", Action: "sync", Data: s.ListChatMessages(200)},
 		}
 		for _, evt := range syncs {
@@ -106,18 +104,7 @@ func handleChatInbound(in InboundMsg, username string, s *store.Store, hub *Hub,
 	if err := json.Unmarshal(in.Data, &p); err != nil {
 		return
 	}
-	msg := strings.TrimSpace(p.Message)
-	if msg == "" || len(msg) > 2000 {
-		return
-	}
-	if !h.chatRateLimit(username) {
-		return
-	}
-	saved, err := s.AddChatMessage(username, msg)
-	if err != nil {
-		return
-	}
-	hub.Publish("chat", "add", saved)
+	_, _ = h.addChatMessage(username, p.Message)
 }
 
 // buildSessionList is kept verbatim from the previous implementation.

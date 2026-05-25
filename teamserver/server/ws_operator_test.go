@@ -17,7 +17,7 @@ import (
 )
 
 // wsTestEnv is a minimal harness: HTTP test server + Hub + Store + Handler
-// with a valid JWT key. Returns a WS-ready URL (ws://... with ?token=).
+// with a valid JWT key. Returns a WS-ready URL that uses a short-lived ticket.
 type wsTestEnv struct {
 	server   *httptest.Server
 	hub      *Hub
@@ -45,6 +45,7 @@ func newWSTestEnv(t *testing.T, username string) *wsTestEnv {
 	h := NewHandler(s, privKey, "", &noopLM{}, &nopPersister{}, 0, nil, hub, nil, nil, jwtKey)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/ws-ticket", h.authMiddleware(h.HandleWSTicket))
 	mux.HandleFunc("/ws/operator", handleOperatorWebSocket(hub, s, h))
 
 	srv := httptest.NewServer(mux)
@@ -59,12 +60,49 @@ func newWSTestEnv(t *testing.T, username string) *wsTestEnv {
 	}
 }
 
-func (e *wsTestEnv) wsURL() string {
+func (e *wsTestEnv) token() string {
 	tok, err := auth.SignToken(e.username, e.jwtKey)
 	if err != nil {
 		panic(err)
 	}
-	return "ws" + strings.TrimPrefix(e.server.URL, "http") + "/ws/operator?token=" + tok
+	return tok
+}
+
+func (e *wsTestEnv) wsURL(t *testing.T) string {
+	t.Helper()
+	ticket := e.wsTicket(t)
+	return "ws" + strings.TrimPrefix(e.server.URL, "http") + "/ws/operator?ticket=" + ticket
+}
+
+func (e *wsTestEnv) legacyTokenURL() string {
+	return "ws" + strings.TrimPrefix(e.server.URL, "http") + "/ws/operator?token=" + e.token()
+}
+
+func (e *wsTestEnv) wsTicket(t *testing.T) string {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, e.server.URL+"/api/ws-ticket", nil)
+	if err != nil {
+		t.Fatalf("ticket req: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+e.token())
+	resp, err := e.server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("ticket post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ticket status = %d", resp.StatusCode)
+	}
+	var body struct {
+		Ticket string `json:"ticket"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("ticket decode: %v", err)
+	}
+	if body.Ticket == "" {
+		t.Fatal("empty ticket")
+	}
+	return body.Ticket
 }
 
 func dialWS(t *testing.T, url string) *websocket.Conn {
@@ -77,6 +115,16 @@ func dialWS(t *testing.T, url string) *websocket.Conn {
 	}
 	t.Cleanup(func() { _ = c.Close(websocket.StatusNormalClosure, "") })
 	return c
+}
+
+func dialWSWithOrigin(t *testing.T, url string, origin string) (*websocket.Conn, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{origin}},
+	})
+	return c, err
 }
 
 func readEvent(t *testing.T, c *websocket.Conn) Event {
@@ -102,7 +150,7 @@ func TestInitialChatSync(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	conn := dialWS(t, env.wsURL())
+	conn := dialWS(t, env.wsURL(t))
 
 	// Drain initial sync events until we see a chat sync.
 	deadline := time.Now().Add(2 * time.Second)
@@ -124,11 +172,75 @@ func TestInitialChatSync(t *testing.T) {
 	t.Fatal("did not receive chat sync within timeout")
 }
 
+func TestWebSocketRejectsBearerQueryTokenByDefault(t *testing.T) {
+	env := newWSTestEnv(t, "alice")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, env.legacyTokenURL(), nil)
+	if err == nil {
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+		t.Fatal("legacy bearer query token connected")
+	}
+}
+
+func TestWebSocketTicketIsSingleUse(t *testing.T) {
+	env := newWSTestEnv(t, "alice")
+	url := env.wsURL(t)
+	conn := dialWS(t, url)
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	reused, _, err := websocket.Dial(ctx, url, nil)
+	if err == nil {
+		_ = reused.Close(websocket.StatusNormalClosure, "")
+		t.Fatal("reused websocket ticket connected")
+	}
+}
+
+func TestWebSocketAllowsLocalhostOperatorOrigin(t *testing.T) {
+	env := newWSTestEnv(t, "alice")
+	conn, err := dialWSWithOrigin(t, env.wsURL(t), "http://localhost:9090")
+	if err != nil {
+		t.Fatalf("dial with localhost origin: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
+}
+
+func TestWebSocketAllowsExternalOriginByDefault(t *testing.T) {
+	env := newWSTestEnv(t, "alice")
+	conn, err := dialWSWithOrigin(t, env.wsURL(t), "https://evil.example")
+	if err != nil {
+		t.Fatalf("dial with external origin: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
+}
+
+func TestWebSocketRejectsExternalOriginWhenAllowlistConfigured(t *testing.T) {
+	t.Setenv("BEBOP_ALLOWED_ORIGINS", "https://ops.example")
+	env := newWSTestEnv(t, "alice")
+	conn, err := dialWSWithOrigin(t, env.wsURL(t), "https://evil.example")
+	if err == nil {
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+		t.Fatal("external origin connected despite allowlist")
+	}
+}
+
+func TestWebSocketAllowsConfiguredURLOrigin(t *testing.T) {
+	t.Setenv("BEBOP_ALLOWED_ORIGINS", "https://ops.example")
+	env := newWSTestEnv(t, "alice")
+	conn, err := dialWSWithOrigin(t, env.wsURL(t), "https://ops.example")
+	if err != nil {
+		t.Fatalf("dial with configured origin: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
+}
+
 func TestInboundChatBroadcastsToAllSubscribers(t *testing.T) {
 	env := newWSTestEnv(t, "alice")
 
-	c1 := dialWS(t, env.wsURL())
-	c2 := dialWS(t, env.wsURL())
+	c1 := dialWS(t, env.wsURL(t))
+	c2 := dialWS(t, env.wsURL(t))
 	drainInitialSync(t, c1)
 	drainInitialSync(t, c2)
 
@@ -163,7 +275,7 @@ func TestInboundChatBroadcastsToAllSubscribers(t *testing.T) {
 
 func TestInboundChatUsesJWTUsername(t *testing.T) {
 	env := newWSTestEnv(t, "alice")
-	c := dialWS(t, env.wsURL())
+	c := dialWS(t, env.wsURL(t))
 	drainInitialSync(t, c)
 
 	// Attempt to spoof operator via payload.
@@ -192,7 +304,7 @@ func TestInboundChatUsesJWTUsername(t *testing.T) {
 
 func TestInboundChatRejectsEmpty(t *testing.T) {
 	env := newWSTestEnv(t, "alice")
-	c := dialWS(t, env.wsURL())
+	c := dialWS(t, env.wsURL(t))
 	drainInitialSync(t, c)
 
 	for _, payload := range []string{"", "   ", "\t\n"} {
@@ -226,7 +338,7 @@ func TestInboundChatRejectsEmpty(t *testing.T) {
 
 func TestInboundChatRejectsOversize(t *testing.T) {
 	env := newWSTestEnv(t, "alice")
-	c := dialWS(t, env.wsURL())
+	c := dialWS(t, env.wsURL(t))
 	drainInitialSync(t, c)
 
 	big := strings.Repeat("x", 2001)
@@ -256,7 +368,7 @@ func TestInboundChatRejectsOversize(t *testing.T) {
 
 func TestInboundChatRateLimit(t *testing.T) {
 	env := newWSTestEnv(t, "alice")
-	c := dialWS(t, env.wsURL())
+	c := dialWS(t, env.wsURL(t))
 	drainInitialSync(t, c)
 
 	// Send 15 rapid messages. Only 10 should get through (burst size).
@@ -306,9 +418,9 @@ func TestInboundChatRateLimit(t *testing.T) {
 
 func drainInitialSync(t *testing.T, c *websocket.Conn) {
 	t.Helper()
-	// The server sends 5 sync events up-front (sessions, listeners,
-	// events, loot, chat). Read them all.
-	for i := 0; i < 5; i++ {
+	// The server sends 6 sync events up-front (sessions, listeners,
+	// events, loot, library, chat). Read them all.
+	for i := 0; i < 6; i++ {
 		_ = readEvent(t, c)
 	}
 }

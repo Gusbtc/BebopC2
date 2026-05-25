@@ -6,7 +6,7 @@
 
 /* Decrypt narrow string enc[len] into out. Caller must provide len+1 bytes.
    O0 + noinline prevents GCC from constant-folding enc^k at compile time. */
-static __attribute__((noinline, optimize("O0"))) void xor_dec(char *out, const unsigned char *enc, int len) {
+static __attribute__((noinline, optimize("O0"), unused)) void xor_dec(char *out, const unsigned char *enc, int len) {
     static const unsigned char k[] = OBF_KEY;
     for (int i = 0; i < len; i++)
         out[i] = (char)(enc[i] ^ k[i % OBF_KEY_LEN]);
@@ -14,7 +14,7 @@ static __attribute__((noinline, optimize("O0"))) void xor_dec(char *out, const u
 }
 
 /* Decrypt wide string (UTF-16LE bytes) into out. Caller must provide wlen+1 wchar_t. */
-static __attribute__((noinline, optimize("O0"))) void xor_dec_w(wchar_t *out, const unsigned char *enc, int wlen) {
+static __attribute__((noinline, optimize("O0"), unused)) void xor_dec_w(wchar_t *out, const unsigned char *enc, int wlen) {
     static const unsigned char k[] = OBF_KEY;
     for (int i = 0; i < wlen; i++) {
         unsigned char lo = enc[2*i]   ^ k[(2*i)   % OBF_KEY_LEN];
@@ -25,7 +25,7 @@ static __attribute__((noinline, optimize("O0"))) void xor_dec_w(wchar_t *out, co
 }
 
 /* Compare plain[0..len-1] against XOR-decrypted enc. Returns 1 if equal and plain[len]=='\0'. */
-static __attribute__((noinline, optimize("O0"))) int xor_eq(const char *plain, const unsigned char *enc, int len) {
+static __attribute__((noinline, optimize("O0"), unused)) int xor_eq(const char *plain, const unsigned char *enc, int len) {
     static const unsigned char k[] = OBF_KEY;
     for (int i = 0; i < len; i++)
         if (plain[i] != (char)(enc[i] ^ k[i % OBF_KEY_LEN])) return 0;
@@ -33,7 +33,7 @@ static __attribute__((noinline, optimize("O0"))) int xor_eq(const char *plain, c
 }
 
 /* Returns 1 if plain starts with XOR-decrypted enc (len bytes). */
-static __attribute__((noinline, optimize("O0"))) int xor_prefix(const char *plain, const unsigned char *enc, int len) {
+static __attribute__((noinline, optimize("O0"), unused)) int xor_prefix(const char *plain, const unsigned char *enc, int len) {
     static const unsigned char k[] = OBF_KEY;
     for (int i = 0; i < len; i++)
         if (plain[i] != (char)(enc[i] ^ k[i % OBF_KEY_LEN])) return 0;

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -134,6 +135,159 @@ func TestStoreAndGetResults(t *testing.T) {
 	}
 	if results[0].Output != "root" {
 		t.Fatalf("output mismatch: %q", results[0].Output)
+	}
+}
+
+func TestStoreAndGetInlineAssemblyResult(t *testing.T) {
+	s := newStore(t)
+	s.RegisterBeacon(newMeta(201))
+	receivedAt := time.Now().UTC().Truncate(time.Second)
+	want := &models.Result{
+		Label:         11,
+		BeaconID:      201,
+		Flags:         3,
+		Type:          protocol.TaskInlineAssembly,
+		Filename:      "asm.bin",
+		Output:        "legacy output",
+		ExitCode:      -7,
+		Stdout:        "stdout text",
+		Stderr:        "stderr text",
+		Exception:     "exception text",
+		DurationMS:    1234,
+		Truncated:     true,
+		Mode:          "bridge",
+		BridgeVersion: "1.2.3",
+		Diagnostics:   "diag text",
+		ReceivedAt:    receivedAt,
+	}
+
+	s.StoreResult(want)
+
+	results := s.GetResults(201)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	got := results[0]
+	if got.Label != want.Label || got.BeaconID != want.BeaconID || got.Flags != want.Flags || got.Type != want.Type {
+		t.Fatalf("identity mismatch: got %#v want %#v", got, want)
+	}
+	if got.Filename != want.Filename || got.Output != want.Output {
+		t.Fatalf("legacy fields mismatch: got %#v want %#v", got, want)
+	}
+	if got.ExitCode != want.ExitCode || got.Stdout != want.Stdout || got.Stderr != want.Stderr || got.Exception != want.Exception {
+		t.Fatalf("structured text mismatch: got %#v want %#v", got, want)
+	}
+	if got.DurationMS != want.DurationMS || got.Truncated != want.Truncated || got.Mode != want.Mode || got.BridgeVersion != want.BridgeVersion || got.Diagnostics != want.Diagnostics {
+		t.Fatalf("structured metadata mismatch: got %#v want %#v", got, want)
+	}
+	if !got.ReceivedAt.Equal(want.ReceivedAt) {
+		t.Fatalf("received_at mismatch: got %v want %v", got.ReceivedAt, want.ReceivedAt)
+	}
+}
+
+func TestResultSchemaUpgradePreservesLegacyRows(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	legacySchema := `
+CREATE TABLE results (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	label INTEGER NOT NULL,
+	beacon_id INTEGER NOT NULL,
+	flags INTEGER NOT NULL DEFAULT 0,
+	type INTEGER NOT NULL DEFAULT 0,
+	filename TEXT,
+	output TEXT,
+	received_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);`
+	if _, err := db.Exec(legacySchema); err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+
+	receivedAt := time.Now().UTC().Truncate(time.Second)
+	if _, err := db.Exec(
+		`INSERT INTO results (label, beacon_id, flags, type, filename, output, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		9, 303, 1, 4, "legacy.txt", "legacy output", receivedAt,
+	); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+	db.Close()
+
+	s, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("store.New upgrade legacy db: %v", err)
+	}
+
+	results := s.GetResults(303)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 migrated result, got %d", len(results))
+	}
+
+	got := results[0]
+	if got.Filename != "legacy.txt" || got.Output != "legacy output" {
+		t.Fatalf("legacy fields mismatch after upgrade: %#v", got)
+	}
+	if got.ExitCode != 0 || got.Stdout != "" || got.Stderr != "" || got.Exception != "" {
+		t.Fatalf("new text defaults mismatch after upgrade: %#v", got)
+	}
+	if got.DurationMS != 0 || got.Truncated || got.Mode != "" || got.BridgeVersion != "" || got.Diagnostics != "" {
+		t.Fatalf("new metadata defaults mismatch after upgrade: %#v", got)
+	}
+
+	structured := &models.Result{
+		Label:         10,
+		BeaconID:      303,
+		Type:          protocol.TaskInlineAssembly,
+		Output:        "compat output",
+		ExitCode:      23,
+		Stdout:        "new stdout",
+		Stderr:        "new stderr",
+		Exception:     "new exception",
+		DurationMS:    77,
+		Truncated:     true,
+		Mode:          "bridge",
+		BridgeVersion: "2.0.0",
+		Diagnostics:   "new diagnostics",
+		ReceivedAt:    receivedAt.Add(time.Second),
+	}
+	s.StoreResult(structured)
+
+	results = s.GetResults(303)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results after structured insert, got %d", len(results))
+	}
+	got = results[1]
+	if got.Type != protocol.TaskInlineAssembly || got.Output != structured.Output {
+		t.Fatalf("structured legacy fields mismatch after upgrade: %#v", got)
+	}
+	if got.ExitCode != structured.ExitCode || got.Stdout != structured.Stdout || got.Stderr != structured.Stderr || got.Exception != structured.Exception {
+		t.Fatalf("structured text mismatch after upgrade: %#v", got)
+	}
+	if got.DurationMS != structured.DurationMS || got.Truncated != structured.Truncated || got.Mode != structured.Mode || got.BridgeVersion != structured.BridgeVersion || got.Diagnostics != structured.Diagnostics {
+		t.Fatalf("structured metadata mismatch after upgrade: %#v", got)
+	}
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("close upgraded store: %v", err)
+	}
+	s, err = New(dbPath)
+	if err != nil {
+		t.Fatalf("store.New reopen upgraded db: %v", err)
+	}
+	defer s.Close()
+}
+
+func TestIsDuplicateColumnError(t *testing.T) {
+	if !isDuplicateColumnError(fmt.Errorf("duplicate column name: stdout")) {
+		t.Fatal("expected duplicate column error to match")
+	}
+	if isDuplicateColumnError(fmt.Errorf("some other sqlite error")) {
+		t.Fatal("unexpected duplicate column match")
 	}
 }
 
@@ -365,6 +519,11 @@ func TestExfilFragmentAssembly(t *testing.T) {
 	}
 	if entry.Filename != "file" {
 		t.Fatalf("expected filename 'file', got %q", entry.Filename)
+	}
+	entry.Filename = "mutated"
+	entryAgain := s.GetExfilFile(42)
+	if entryAgain == nil || entryAgain.Filename != "file" {
+		t.Fatalf("GetExfilFile leaked mutable state: %#v", entryAgain)
 	}
 
 	s.DeleteExfilFile(42)

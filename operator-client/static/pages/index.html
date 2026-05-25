@@ -14,6 +14,7 @@
             <a href="/sessions" class="active">Sessions</a>
             <a href="/listeners">Listeners</a>
             <a href="/build">Build</a>
+            <a href="/mcp">MCP</a>
         </nav>
         <div class="conn-indicator">
             <span class="conn-dot" id="conn-dot"></span>
@@ -98,6 +99,7 @@
                 <div class="event-log-tabs-bar">
                     <span class="event-log-tab active" data-tab="events" onclick="switchLogTab('events')">EVENT LOG</span>
                     <span class="event-log-tab" data-tab="loot" onclick="switchLogTab('loot')">LOOT</span>
+                    <span class="event-log-tab" data-tab="library" onclick="switchLogTab('library')">LIBRARY</span>
                     <span class="event-log-tab" data-tab="chat" onclick="switchLogTab('chat')">
                       CHAT
                       <span class="chat-unread-dot" id="chatUnreadDot"></span>
@@ -109,6 +111,28 @@
                 </div>
                 <div class="event-log-body" id="loot-log-body" style="display:none">
                     <div class="event-log-empty">no loot yet&hellip; Download something from a beacon</div>
+                </div>
+                <div class="event-log-body" id="library-log-body" style="display:none">
+                    <div class="library-toolbar">
+                        <div class="library-toolbar-copy">
+                            <span class="library-toolbar-title">Library files</span>
+                            <span class="library-toolbar-meta">.o .obj .exe</span>
+                        </div>
+                        <button class="library-upload-btn" onclick="openLibraryUploadPicker()" title="Upload library file">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            <span>Upload</span>
+                        </button>
+                    </div>
+                    <div class="library-table-head">
+                        <span>Source</span>
+                        <span>Type</span>
+                        <span>Name</span>
+                        <span>Size</span>
+                        <span></span>
+                    </div>
+                    <div id="library-list">
+                        <div class="event-log-empty">no library files yet&hellip;</div>
+                    </div>
                 </div>
                 <div class="event-log-body" id="chat-log-body" style="display:none">
                     <div class="chat-messages" id="chat-messages"></div>

@@ -21,9 +21,11 @@ type exfilFragment struct {
 }
 
 type exfilState struct {
-	Filename  string
-	Fragments []exfilFragment
-	CreatedAt time.Time
+	Filename    string
+	Fragments   []exfilFragment
+	Identifiers map[uint32]struct{}
+	TotalSize   int
+	CreatedAt   time.Time
 }
 
 // Session represents an active TCP session for a beacon.
@@ -175,6 +177,19 @@ func (s *Store) GetNextTask(beaconID uint32) *models.Task {
 	return t
 }
 
+func (s *Store) GetTaskByLabel(label uint32) *models.Task {
+	t := &models.Task{}
+	err := s.db.QueryRow(
+		`SELECT label, beacon_id, type, code, flags, identifier, data, status, created_at
+		 FROM tasks WHERE label = ? ORDER BY id DESC LIMIT 1`,
+		label,
+	).Scan(&t.Label, &t.BeaconID, &t.Type, &t.Code, &t.Flags, &t.Identifier, &t.Data, &t.Status, &t.CreatedAt)
+	if err != nil {
+		return nil
+	}
+	return t
+}
+
 func (s *Store) DrainPendingTasks(beaconID uint32) []*models.Task {
 	rows, err := s.db.Query(
 		`SELECT label, beacon_id, type, code, flags, identifier, data, status, created_at
@@ -234,9 +249,12 @@ func (s *Store) StoreResult(r *models.Result) {
 		r.ReceivedAt = time.Now()
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO results (label, beacon_id, flags, type, filename, output, received_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		r.Label, r.BeaconID, r.Flags, r.Type, r.Filename, r.Output, r.ReceivedAt,
+		`INSERT INTO results (
+			label, beacon_id, flags, type, filename, output, exit_code, stdout, stderr,
+			exception, duration_ms, truncated, mode, bridge_version, diagnostics, received_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.Label, r.BeaconID, r.Flags, r.Type, r.Filename, r.Output, r.ExitCode, r.Stdout, r.Stderr,
+		r.Exception, r.DurationMS, boolToInt(r.Truncated), r.Mode, r.BridgeVersion, r.Diagnostics, r.ReceivedAt,
 	)
 	if err != nil {
 		ui.Errorf("store", "store result: %v", err)
@@ -245,7 +263,8 @@ func (s *Store) StoreResult(r *models.Result) {
 
 func (s *Store) GetResults(beaconID uint32) []*models.Result {
 	rows, err := s.db.Query(
-		`SELECT label, beacon_id, flags, type, filename, output, received_at
+		`SELECT label, beacon_id, flags, type, filename, output, exit_code, stdout, stderr,
+		        exception, duration_ms, truncated, mode, bridge_version, diagnostics, received_at
 		 FROM results WHERE beacon_id = ? ORDER BY id`,
 		beaconID,
 	)
@@ -260,7 +279,8 @@ func (s *Store) GetResults(beaconID uint32) []*models.Result {
 func (s *Store) GetResultsSince(beaconID uint32, since int64) []*models.Result {
 	t := time.Unix(since, 0)
 	rows, err := s.db.Query(
-		`SELECT label, beacon_id, flags, type, filename, output, received_at
+		`SELECT label, beacon_id, flags, type, filename, output, exit_code, stdout, stderr,
+		        exception, duration_ms, truncated, mode, bridge_version, diagnostics, received_at
 		 FROM results WHERE beacon_id = ? AND received_at > ? ORDER BY id`,
 		beaconID, t,
 	)
@@ -275,7 +295,8 @@ func (s *Store) GetResultsSince(beaconID uint32, since int64) []*models.Result {
 // AllResults returns all results indexed by beacon ID.
 func (s *Store) AllResults() map[uint32][]*models.Result {
 	rows, err := s.db.Query(
-		`SELECT label, beacon_id, flags, type, filename, output, received_at
+		`SELECT label, beacon_id, flags, type, filename, output, exit_code, stdout, stderr,
+		        exception, duration_ms, truncated, mode, bridge_version, diagnostics, received_at
 		 FROM results ORDER BY beacon_id, received_at`,
 	)
 	if err != nil {
@@ -295,13 +316,26 @@ func scanResults(rows *sql.Rows) []*models.Result {
 	var out []*models.Result
 	for rows.Next() {
 		r := &models.Result{}
-		if err := rows.Scan(&r.Label, &r.BeaconID, &r.Flags, &r.Type, &r.Filename, &r.Output, &r.ReceivedAt); err != nil {
+		var truncated int
+		if err := rows.Scan(
+			&r.Label, &r.BeaconID, &r.Flags, &r.Type, &r.Filename, &r.Output, &r.ExitCode,
+			&r.Stdout, &r.Stderr, &r.Exception, &r.DurationMS, &truncated, &r.Mode,
+			&r.BridgeVersion, &r.Diagnostics, &r.ReceivedAt,
+		); err != nil {
 			ui.Errorf("store", "scan result: %v", err)
 			continue
 		}
+		r.Truncated = truncated != 0
 		out = append(out, r)
 	}
 	return out
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 // DeleteBeacon removes a beacon and all associated tasks and results.
@@ -407,8 +441,15 @@ func (s *Store) AddExfilFragment(label, identifier uint32, flags uint16, raw []b
 
 	state, ok := s.exfilFragments[label]
 	if !ok {
-		state = &exfilState{CreatedAt: time.Now()}
+		state = &exfilState{CreatedAt: time.Now(), Identifiers: make(map[uint32]struct{})}
 		s.exfilFragments[label] = state
+	}
+	if state.Identifiers == nil {
+		state.Identifiers = make(map[uint32]struct{}, len(state.Fragments))
+		for _, f := range state.Fragments {
+			state.Identifiers[f.Identifier] = struct{}{}
+			state.TotalSize += len(f.Data)
+		}
 	}
 
 	const maxFragments = 16384
@@ -428,24 +469,20 @@ func (s *Store) AddExfilFragment(label, identifier uint32, flags uint16, raw []b
 		return false, "", nil
 	}
 
-	var totalSize int
-	for _, f := range state.Fragments {
-		totalSize += len(f.Data)
-	}
-	if totalSize+len(chunkData) > maxExfilSize {
+	if state.TotalSize+len(chunkData) > maxExfilSize {
 		delete(s.exfilFragments, label)
 		return false, "", nil
 	}
 
-	for _, f := range state.Fragments {
-		if f.Identifier == identifier {
-			return false, "", nil
-		}
+	if _, exists := state.Identifiers[identifier]; exists {
+		return false, "", nil
 	}
 
 	cp := make([]byte, len(chunkData))
 	copy(cp, chunkData)
 	state.Fragments = append(state.Fragments, exfilFragment{Identifier: identifier, Data: cp})
+	state.Identifiers[identifier] = struct{}{}
+	state.TotalSize += len(cp)
 
 	if flags&8 == 0 {
 		return false, "", nil
@@ -491,7 +528,12 @@ func (s *Store) ListExfilFiles() []*models.ExfilEntry {
 func (s *Store) GetExfilFile(label uint32) *models.ExfilEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.exfilFiles[label]
+	entry := s.exfilFiles[label]
+	if entry == nil {
+		return nil
+	}
+	cp := *entry
+	return &cp
 }
 
 // DeleteExfilFile removes the exfil entry from the store.

@@ -35,6 +35,12 @@ func TestCreateAndValidate(t *testing.T) {
 	if a.ValidatePassword("noexist", "secret123") {
 		t.Fatal("ValidatePassword returned true for nonexistent user")
 	}
+	if !a.OperatorExists("admin") {
+		t.Fatal("OperatorExists returned false for existing operator")
+	}
+	if a.OperatorExists("noexist") {
+		t.Fatal("OperatorExists returned true for nonexistent operator")
+	}
 }
 
 func TestCreateDuplicateUpdatesPassword(t *testing.T) {

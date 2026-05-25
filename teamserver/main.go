@@ -118,10 +118,14 @@ func main() {
 		reader := bufio.NewReader(os.Stdin)
 	choiceLoop:
 		for {
-			line, _ := reader.ReadString('\n')
+			line, readErr := reader.ReadString('\n')
 			choice := strings.ToUpper(strings.TrimSpace(line))
 			if choice == "" {
-				choice = "L"
+				if readErr != nil && !term.IsTerminal(int(os.Stdin.Fd())) {
+					choice = "Q"
+				} else {
+					choice = "L"
+				}
 			}
 			switch choice {
 			case "L":
@@ -129,7 +133,8 @@ func main() {
 				session, err := p.Load()
 				if err != nil {
 					ui.Errorf("session", "load failed: %v", err)
-					os.Exit(1)
+					ui.Prompt("choice")
+					continue choiceLoop
 				}
 				s.LoadListeners(session.Listeners)
 				s.LoadBeacons(session.Beacons)
@@ -181,6 +186,7 @@ func main() {
 					ui.Errorf("reset", "chat: %v", err)
 					os.Exit(1)
 				}
+				os.RemoveAll(server.LootDir())
 				os.RemoveAll("exfil")
 				ui.Action("reset", "session cleared, exfil files deleted, chat cleared")
 				ui.Blank()

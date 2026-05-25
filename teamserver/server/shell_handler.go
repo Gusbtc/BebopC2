@@ -12,12 +12,14 @@ import (
 	"nhooyr.io/websocket"
 )
 
+const shellWebSocketWriteTimeout = 5 * time.Second
+
 // ShellManager tracks active WebSocket connections for interactive shell sessions.
 // Buffers output arriving before WebSocket connects.
 type ShellManager struct {
-	mu     sync.RWMutex
-	conns  map[uint32]*websocket.Conn
-	bufs   map[uint32][][]byte
+	mu    sync.RWMutex
+	conns map[uint32]*websocket.Conn
+	bufs  map[uint32][][]byte
 }
 
 // NewShellManager creates a new ShellManager.
@@ -36,9 +38,10 @@ func (sm *ShellManager) Register(beaconID uint32, conn *websocket.Conn) {
 	delete(sm.bufs, beaconID)
 	sm.mu.Unlock()
 
-	ctx := context.Background()
 	for _, data := range pending {
-		conn.Write(ctx, websocket.MessageBinary, data)
+		ctx, cancel := context.WithTimeout(context.Background(), shellWebSocketWriteTimeout)
+		_ = conn.Write(ctx, websocket.MessageBinary, data)
+		cancel()
 	}
 }
 
@@ -74,7 +77,8 @@ func (sm *ShellManager) Send(beaconID uint32, data []byte) bool {
 		return true
 	}
 	sm.mu.Unlock()
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), shellWebSocketWriteTimeout)
+	defer cancel()
 	return conn.Write(ctx, websocket.MessageBinary, data) == nil
 }
 
@@ -88,9 +92,7 @@ func handleShellWebSocket(w http.ResponseWriter, r *http.Request, sl *SessionLis
 	beaconID := uint32(id64)
 
 	// Accept WebSocket immediately — no longer require session mode
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
-	})
+	conn, err := acceptOperatorWebSocket(w, r)
 	if err != nil {
 		return
 	}

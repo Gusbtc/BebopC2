@@ -168,6 +168,7 @@ function saveSettings() {
     if (document.getElementById('sessions-table-view')) loadSessions();
     if (document.getElementById('listeners-tbody')) loadListeners();
     if (document.getElementById('build-btn')) populateBuildListeners();
+    if (document.getElementById('mcp-page-body')) loadMCPPanel('mcp-page-body');
 }
 
 function initSettings() {
@@ -176,7 +177,7 @@ function initSettings() {
     const portEl = document.getElementById('tsPort');
     if (ipEl)   ipEl.value   = localStorage.getItem('tsIp')   || '';
     if (portEl) portEl.value = localStorage.getItem('tsPort')  || '';
-    updateConnIndicator(!!(localStorage.getItem('tsIp') || ''));
+    updateConnIndicator(false);
 }
 
 function ensureSettingsModal() {
@@ -269,6 +270,7 @@ function updateConnIndicator(connected) {
 
 async function authFetch(url, options = {}) {
     const token = localStorage.getItem('authToken');
+    const originalUrl = url;
     if (token) {
         if (!options.headers) options.headers = {};
         if (options.headers instanceof Headers) {
@@ -277,13 +279,49 @@ async function authFetch(url, options = {}) {
             options.headers['Authorization'] = 'Bearer ' + token;
         }
     }
-    const resp = await fetch(url, options);
+    let resp;
+    try {
+        resp = await fetch(url, options);
+    } catch (e) {
+        if (!isTeamserverUrl(originalUrl)) throw e;
+        const proxyOptions = Object.assign({}, options);
+        proxyOptions.headers = cloneHeaders(options.headers);
+        resp = await fetch('/api/proxy?url=' + encodeURIComponent(originalUrl), proxyOptions);
+    }
     if (resp.status === 401) {
         localStorage.removeItem('authToken');
         window.location.href = '/login';
         throw new Error('unauthorized');
     }
     return resp;
+}
+
+async function makeWebSocketURL(path) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) throw new Error('teamserver not configured');
+    const ticketResp = await authFetch(tsUrl + '/api/ws-ticket', { method: 'POST' });
+    if (!ticketResp.ok) throw new Error(await ticketResp.text());
+    const ticketBody = await ticketResp.json();
+    if (!ticketBody || !ticketBody.ticket) throw new Error('websocket ticket unavailable');
+    const wsProto = tsUrl.startsWith('https') ? 'wss' : 'ws';
+    const wsHost = tsUrl.replace(/^https?:\/\//, '');
+    return wsProto + '://' + wsHost + path + '?ticket=' + encodeURIComponent(ticketBody.ticket);
+}
+
+function isTeamserverUrl(url) {
+    const tsUrl = getTsUrl();
+    return !!tsUrl && typeof url === 'string' && url.startsWith(tsUrl + '/');
+}
+
+function cloneHeaders(headers) {
+    const out = {};
+    if (!headers) return out;
+    if (headers instanceof Headers) {
+        headers.forEach((value, key) => { out[key] = value; });
+        return out;
+    }
+    Object.keys(headers).forEach(key => { out[key] = headers[key]; });
+    return out;
 }
 
 function checkAuth() {
@@ -313,138 +351,175 @@ async function logout() {
 
 const HELP_TEXT = [
     '',
-    '[ 01. IDENTITY & RECON ]',
-    '  whoami              Query current session user context',
-    '  hostname            Display target machine network name',
-    '  domain              Retrieve DNS domain / AD membership status',
-    '  getpid              Show process ID of the running implant',
-    '  getintegrity        Check token integrity (Low/Med/High/System)',
+    'BEBOP COMMANDS - WINDOWS',
     '',
-    '[ 02. SYSTEM ENUMERATION ]',
-    '  sysinfo             Retrieve OS build, arch, and memory metrics',
-    '  drives              List logical drives and available storage',
-    '  env                 Dump all process environment variables',
-    '  getenv <var>        Get value of a specific environment variable',
+    '[ IDENTITY / TARGET ]',
+    '  whoami                    Current user context',
+    '  hostname                  Hostname',
+    '  domain                    Domain / AD membership',
+    '  getpid                    Beacon process ID',
+    '  getintegrity              Token integrity level',
+    '  sysinfo                   OS, arch, memory',
+    '  drives                    Logical drives',
+    '  uptime                    Time since boot',
     '',
-    '[ 03. FILESYSTEM MANIPULATION ]',
-    '  pwd                 Print current working directory',
-    '  cd <path>           Change working directory',
-    '  ls [path]           List directory contents (Alias: dir)',
-    '  cat <file>          Read and display raw file content',
-    '  stat <path>         Get file/directory metadata and timestamps',
-    '  mkdir <path>        Create a new directory',
-    '  rm <file>           Permanently delete a file',
-    '  rmdir <path>        Remove an empty directory',
-    '  cp <src> <dst>      Copy file to a new destination',
-    '  mv <src> <dst>      Move or rename file/directory',
+    '[ FILES ]',
+    '  pwd                       Current directory',
+    '  cd <path>                 Change directory',
+    '  ls [path]                 List directory (alias: dir)',
+    '  cat <file>                Read file',
+    '  stat <path>               File metadata',
+    '  mkdir <path>              Create directory',
+    '  rm <file>                 Delete file',
+    '  rmdir <path>              Remove empty directory',
+    '  cp <src> <dst>            Copy file',
+    '  mv <src> <dst>            Move or rename',
     '',
-    '[ 04. PROCESS & NETWORK ]',
-    '  ps                  List active processes (PID, PPID, Name)',
-    '  kill <pid>          Terminate a process by its ID',
-    '  ipconfig            List network adapters and IP addresses',
-    '  arp                 Display current ARP cache entries',
-    '  netstat             List active TCP/UDP connections and listening ports',
-    '  dns <name>          Resolve hostname to IP via DnsQuery (no nslookup)',
+    '[ PROCESS / SERVICES ]',
+    '  ps                        Process list',
+    '  kill <pid>                Terminate process',
+    '  services                  Win32 services',
+    '  schtasks-enum [target]    Scheduled tasks',
+    '  safe-harbor               Process reconnaissance',
     '',
-    '[ 05. PRIVILEGES & GROUPS ]',
-    '  privs               List token privileges (SeDebug, SeImpersonate, etc.)',
-    '  groups              List local groups the current user belongs to',
+    '[ NETWORK / PIVOTING ]',
+    '  ipconfig                  Network adapters',
+    '  arp                       ARP cache',
+    '  netstat                   TCP/UDP connections',
+    '  dns <name>                Resolve hostname',
+    '  xpipe [pipe]              Named pipes and DACLs',
+    '  socks5 start [port]       Start SOCKS5 proxy',
+    '  socks5 stop               Stop SOCKS5 proxy',
     '',
-    '[ 06. PERSISTENCE & CONFIGURATION ]',
-    '  services            Enumerate all Win32 services (name, state, PID)',
-    '  uptime              Time since last system boot (GetTickCount64)',
-    '  reg_query <H\\key> <val>   Read a registry value (HKLM/HKCU/HKCR/HKU)',
-    '  reg_set   <H\\key> <val> <data>  Write a REG_SZ registry value',
+    '[ DOMAIN / DIRECTORY ]',
+    '  ldapsearch <filter> [attrs]        LDAP search',
+    '  adcs_enum [target]                ADCS enumeration',
+    '  password-policy [server]          Password and lockout policy',
+    '  net-shares [target]               Network shares',
+    '  local-sessions                    Local/RDP sessions',
+    '  netloggedon [host]                Logged-on users',
     '',
-    '[ 07. DATA COLLECTION ]',
-    '  clipboard           Read current clipboard text content',
+    '[ PRIVILEGE / CREDENTIALS ]',
+    '  privs                     Token privileges',
+    '  groups                    Current user groups',
+    '  priv-always-install-elevated       AlwaysInstallElevated policy',
+    '  priv-autologon                     Winlogon AutoLogon values',
+    '  priv-credential-manager            Credential Manager entries',
+    '  priv-hijackable-path               Writable PATH directories',
+    '  priv-modifiable-autorun            Writable autorun executables',
+    '  priv-modifiable-service            Modifiable service permissions',
+    '  priv-powershell-history            PSReadLine history location',
+    '  priv-token-privileges              Current token privileges',
+    '  priv-uac-status                    UAC and integrity status',
+    '  priv-unquoted-service-path         Unquoted service paths',
     '',
-    '[ 08. BEACON CONTROL ]',
-    '  sleep <sec> [jit]   Adjust check-in interval and jitter %',
-    '  interactive         Upgrade to persistent TCP session (real-time)',
-    '  shell               Open interactive shell (requires session mode)',
-    '  socks5 start [port] Start SOCKS5 proxy tunnel (requires session mode)',
-    '  socks5 stop         Stop active SOCKS5 proxy tunnel',
-    '  exit                Terminate the beacon process',
+    '[ HOST DATA / REGISTRY ]',
+    '  env                       Environment variables',
+    '  getenv <var>              One environment variable',
+    '  clipboard                 Clipboard text',
+    '  reg_query <H\\key> <val>   Read registry value',
+    '  reg_set <H\\key> <val> <data>  Write REG_SZ value',
+    '  regsession [host]         Registry session hives',
+    '  msi-search                Cached MSI installer metadata',
     '',
-    '[ 09. EXECUTION MODES ]',
-    '  runas <user> <pass> <cmd>  Run command as another user (no runas.exe)',
-    '  shell <cmd>         Execute via cmd.exe /c (Supports pipes/built-ins)',
-    '  <program> [args]    Direct execution (No cmd.exe - Stealthier)',
+    '[ SQL SERVER ]',
+    '  sql-1434udp <ip>                   SQL Browser info',
+    '  sql-info <server> [db]             SQL Server information',
+    '  sql-whoami <server> [db] [link]    SQL login, user, roles',
+    '  sql-impersonate <server> [db]      Impersonation rights',
+    '  sql-links <server> [db] [link]     Linked servers',
+    '  sql-users <server> [db] [link]     Database users',
+    '  sql-databases <server> [db]        Databases',
+    '  sql-tables <server> [db] [link]    Tables',
+    '  sql-columns <server> <table> [db]  Columns',
+    '  sql-rows <server> <table> [db]     Row count',
+    '  sql-search <server> <term> [db]    Column-name search',
+    '  sql-query <server> <query> [db]    Custom SQL query',
+    '  sql-agentstatus <server> [db]      SQL Agent status and jobs',
+    '  sql-checkrpc <server> [db]         Linked-server RPC status',
     '',
-    '[ 10. EXECUTE-ASSEMBLY ]',
-    '  execute-assembly [args]         Execute .NET assembly in memory (file picker)',
-    '  execute-assembly <name> [args]  Execute .NET assembly from library',
-    '  assembly-upload <name>          Upload .NET assembly to library',
-    '  assembly-list                   List assemblies in library',
-    '  assembly-delete <name>          Remove assembly from library',
+    '[ EXECUTION / MODULES ]',
+    '  shell                     Interactive shell (session mode)',
+    '  shell <cmd>               Run via cmd.exe /c',
+    '  runas <user> <pass> <cmd> Run as another user',
+    '  <program> [args]          Direct process execution',
+    '  execute-assembly [args]         Run assembly with file picker',
+    '  execute-assembly <name> [args]  Run assembly from library',
+    '  inline-assembly [args]          Run in-process with file picker',
+    '  inline-assembly <name> [args]   Run in-process from library',
+    '  inline-assembly --mode bridge   Managed bridge capture',
+    '  inline-assembly --mode auto     Same as bridge',
+    '  bof-execute [args]                    Run .o/.obj with file picker',
+    '  bof-execute <name.o|name.obj> [args]  Run BOF from library',
     '',
-    '[ 11. TERMINAL ]',
-    '  help                Show this command reference',
-    '  clear               Clear the terminal screen',
+    '[ LIBRARY ]',
+    '  assembly-upload <name>          Upload .exe to library',
+    '  assembly-list                   List uploaded assemblies',
+    '  assembly-delete <name>          Delete uploaded assembly',
+    '  bof-upload <name.o|name.obj>          Upload BOF to library',
+    '  bof-list                              List operator and built-in BOFs',
     '',
-    '[ 12. FILE TRANSFER ]',
-    '  download <remote>    Exfil file from target to teamserver (beacon→op)',
-    '  upload <remote>     Upload file from operator to target path (op→beacon)',
-    '                      Opens a file picker, then stages the selected file to <remote>',
+    '[ TRANSFER / CONTROL ]',
+    '  download <remote>             Download from target',
+    '  upload <remote>               Upload to target',
+    '  sleep <sec> [jitter]          Set callback interval',
+    '  interactive                   Start real-time session',
+    '  exit                          Terminate beacon',
     '',
-    '───────────────────────────────────────────────────────────────',
-    'All commands are executed natively via Win32 API unless "shell" is used.',
+    '[ OPERATOR ]',
+    '  Library tab                   Upload/delete operator .o, .obj, .exe files',
+    '  help                          Show this reference',
+    '  clear                         Clear terminal',
 ];
 
 const HELP_TEXT_LINUX = [
     '',
-    '[ 01. IDENTITY & RECON ]',
-    '  whoami / id         User context (uid, gid, groups)',
-    '  hostname            Machine hostname and kernel info',
+    'BEBOP COMMANDS - LINUX',
     '',
-    '[ 02. FILESYSTEM ]',
-    '  pwd                 Print working directory',
-    '  cd <path>           Change working directory',
-    '  ls [path]           List directory with permissions and metadata',
-    '  cat <file>          Read file content (max 1MB)',
-    '  mkdir <path>        Create directory',
-    '  rm [-r] <path>      Delete file or directory (-r for recursive)',
-    '  cp <src> <dst>      Copy file',
-    '  mv <src> <dst>      Move or rename file',
-    '  chmod <mode> <path> Change permissions (octal, e.g. 755)',
+    '[ TARGET ]',
+    '  whoami / id               User context',
+    '  hostname                  Hostname and kernel',
     '',
-    '[ 03. PROCESS & ENVIRONMENT ]',
-    '  ps                  List processes (PID, PPID, user, command)',
-    '  kill [sig] <pid>    Send signal to process (default: SIGTERM)',
-    '  env                 List all environment variables',
-    '  getenv <var>        Get specific environment variable',
+    '[ FILES ]',
+    '  pwd                       Current directory',
+    '  cd <path>                 Change directory',
+    '  ls [path]                 List directory',
+    '  cat <file>                Read file',
+    '  mkdir <path>              Create directory',
+    '  rm [-r] <path>            Delete file or directory',
+    '  cp <src> <dst>            Copy file',
+    '  mv <src> <dst>            Move or rename',
+    '  chmod <mode> <path>       Change permissions',
     '',
-    '[ 04. NETWORK ]',
-    '  ipconfig / ifconfig  List network interfaces with IPs and MACs',
-    '  netstat             List TCP/UDP connections and listeners',
-    '  curl <url>          HTTP GET request (http only)',
-    '  portscan <host> <ports>  TCP connect scan (supports CIDR)',
+    '[ PROCESS / ENV ]',
+    '  ps                        Process list',
+    '  kill [sig] <pid>          Send signal',
+    '  env                       Environment variables',
+    '  getenv <var>              One environment variable',
     '',
-    '[ 05. OFFENSIVE ]',
-    '  triagedirectory [path]   Find sensitive files (SSH keys, creds, configs)',
-    '  ssh <user@host> <cmd>    Execute command on remote host via SSH',
+    '[ NETWORK ]',
+    '  ipconfig / ifconfig       Network interfaces',
+    '  netstat                   TCP/UDP connections',
+    '  curl <url>                HTTP GET request',
+    '  portscan <host> <ports>   TCP connect scan',
     '',
-    '[ 06. FILE TRANSFER ]',
-    '  download <remote>   Exfil file from target to teamserver',
-    '  upload <remote>     Upload file from operator to target path',
+    '[ COLLECTION / REMOTE ]',
+    '  triagedirectory [path]    Find sensitive files',
+    '  ssh <user@host> <cmd>     Execute command over SSH',
     '',
-    '[ 07. BEACON CONTROL ]',
-    '  sleep <sec> [jit]   Adjust check-in interval and jitter %',
-    '  interactive         Upgrade to persistent TCP session (real-time)',
-    '  socks5 start [port] Start SOCKS5 proxy tunnel (requires session mode)',
-    '  socks5 stop         Stop active SOCKS5 proxy tunnel',
-    '  exit                Terminate the beacon process',
+    '[ TRANSFER / CONTROL ]',
+    '  download <remote>         Download from target',
+    '  upload <remote>           Upload to target',
+    '  sleep <sec> [jitter]      Set callback interval',
+    '  interactive               Start real-time session',
+    '  socks5 start [port]       Start SOCKS5 proxy',
+    '  socks5 stop               Stop SOCKS5 proxy',
+    '  exit                      Terminate beacon',
     '',
-    '[ 08. SHELL PASSTHROUGH ]',
-    '  shell <cmd>         Execute command via /bin/sh -c (pipes, redirects)',
-    '',
-    '[ 09. TERMINAL ]',
-    '  help                Show this command reference',
-    '  clear               Clear the terminal screen',
-    '',
-    '───────────────────────────────────────────────────────────────',
-    'All commands are native builtins (no child process). Use "shell <cmd>" for /bin/sh.',
+    '[ SHELL / OPERATOR ]',
+    '  shell <cmd>               Run via /bin/sh -c',
+    '  help                      Show this reference',
+    '  clear                     Clear terminal',
 ];
 
 // ---- Utilities ----
@@ -458,6 +533,19 @@ const VALID_COMMANDS_LINUX = [
     'download', 'upload', 'socks5',
 ];
 
+const BUILTIN_BOF_COMMANDS = [
+    'ldapsearch', 'adcs_enum', 'password-policy',
+    'local-sessions', 'net-shares', 'regsession', 'netloggedon', 'schtasks-enum',
+    'xpipe', 'msi-search', 'safe-harbor',
+    'priv-always-install-elevated', 'priv-autologon', 'priv-credential-manager',
+    'priv-hijackable-path', 'priv-modifiable-autorun', 'priv-modifiable-service',
+    'priv-powershell-history', 'priv-token-privileges', 'priv-uac-status',
+    'priv-unquoted-service-path',
+    'sql-1434udp', 'sql-info', 'sql-whoami', 'sql-impersonate', 'sql-links',
+    'sql-users', 'sql-databases', 'sql-tables', 'sql-columns', 'sql-rows',
+    'sql-search', 'sql-query', 'sql-agentstatus', 'sql-checkrpc',
+];
+
 const VALID_COMMANDS = [
     'whoami', 'hostname', 'domain', 'getpid', 'getintegrity',
     'sysinfo', 'drives', 'env', 'getenv', 'pwd', 'cd', 'ls', 'dir',
@@ -467,7 +555,8 @@ const VALID_COMMANDS = [
     'reg_query', 'reg_set', 'clipboard', 'runas',
     'shell', 'sleep', 'interactive', 'exit', 'help', 'clear',
     'download', 'upload', 'socks5',
-    'execute-assembly', 'assembly-upload', 'assembly-list', 'assembly-delete',
+    'execute-assembly', 'inline-assembly', 'bof-execute', 'bof-upload', 'bof-list', 'assembly-upload', 'assembly-list', 'assembly-delete',
+    ...BUILTIN_BOF_COMMANDS,
 ];
 
 const ARCH_MAP      = ['x86', 'x64', 'arm', 'arm64'];
@@ -489,11 +578,25 @@ setInterval(() => {
     let changed = false;
     for (const b of Object.values(_beacons || {})) {
         const wasAlive = b.alive;
-        b.alive = b.last_seen && (now - b.last_seen) < 180;
+        b.alive = beaconIsAliveNow(b, now);
         if (b.alive !== wasAlive) changed = true;
     }
     if (changed) _renderSessionsFromCache();
 }, 1000);
+
+function beaconAliveDeadline(b) {
+    const sleep = Math.max(0, parseInt(b && b.sleep, 10) || 0);
+    const lastSeen = parseInt(b && b.last_seen, 10) || 0;
+    return lastSeen + sleep + 10;
+}
+
+function beaconIsAliveNow(b, now) {
+    if (!b) return false;
+    if (b.mode === 'session') return true;
+    const lastSeen = parseInt(b.last_seen, 10) || 0;
+    if (!lastSeen) return false;
+    return (now || Math.floor(Date.now() / 1000)) < beaconAliveDeadline(b);
+}
 
 function escapeHtml(s) {
     return String(s)
@@ -534,18 +637,58 @@ function cancelKill() {
 
 async function confirmKill() {
     const id = _killTargetId;
-    const target = document.getElementById('kill-modal-target');
-    const hostname = target ? target.textContent : '#' + id;
+    const cached = id == null ? null : _beacons[id];
+    const isDelete = _killIsDead || (cached && !beaconIsAliveNow(cached));
+    let deleteLastSeen = 0;
     cancelKill();
     if (id == null) return;
     const tsUrl = getTsUrl();
     if (!tsUrl) return;
     try {
-        await authFetch(tsUrl + '/api/sessions/' + id, { method: 'DELETE' });
+        if (isDelete) {
+            const fresh = await refreshBeaconBeforeDelete(tsUrl, id);
+            if (fresh && beaconIsAliveNow(fresh)) {
+                alert('Beacon checked in again. Delete canceled. Use Kill Beacon to terminate it.');
+                return;
+            }
+            if (!fresh) {
+                loadSessions();
+                return;
+            }
+            deleteLastSeen = parseInt(fresh.last_seen, 10) || 0;
+        }
+        const deleteQuery = isDelete ? ('?delete=1&action=delete&last_seen=' + encodeURIComponent(String(deleteLastSeen))) : '';
+        const resp = await authFetch(tsUrl + '/api/sessions/' + id + deleteQuery, { method: 'DELETE' });
+        if (resp.status === 409) {
+            alert((await resp.text()) || 'Delete canceled. Beacon is active.');
+            loadSessions();
+            return;
+        }
+        if (!resp.ok) throw new Error(await resp.text());
+        if (isDelete) {
+            delete _beacons[id];
+            _renderSessionsFromCache();
+        }
     } catch (e) {
         console.error('kill beacon:', e);
+        alert('Beacon action failed: ' + (e && e.message ? e.message : e));
     }
     loadSessions();
+}
+
+async function refreshBeaconBeforeDelete(tsUrl, id) {
+    const resp = await authFetch(tsUrl + '/api/sessions', { cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const beacons = await resp.json();
+    let fresh = null;
+    _beacons = {};
+    (beacons || []).forEach(b => {
+        b.alive = beaconIsAliveNow(b);
+        if (String(b.id) === String(id)) fresh = Object.assign({}, b);
+        _beacons[b.id] = b;
+    });
+    _renderSessionsFromCache();
+    return fresh;
 }
 
 // ---- Toast ----
@@ -592,7 +735,6 @@ function _fbTabBid(id) {
 
 function _actualBid() {
     if (typeof beaconId === 'string') {
-        if (beaconId.startsWith('fbs_')) return parseInt(beaconId.slice(4), 10);
         if (beaconId.startsWith('fbs_')) return parseInt(beaconId.slice(4), 10);
         if (beaconId.startsWith('fb_')) return parseInt(beaconId.slice(3), 10);
         if (beaconId.startsWith('sess_')) return parseInt(beaconId.slice(5), 10);

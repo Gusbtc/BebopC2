@@ -1,8 +1,6 @@
 #include <winsock2.h>
 #include <windows.h>
-#include <string.h>
 #include <stdint.h>
-#include <stdio.h>
 #include "transfer.h"
 #include "protocol.h"
 #include "http.h"
@@ -10,6 +8,7 @@
 #include "obf_strings.h"
 #include "../../include/dynapi.h"
 #include "../../include/session.h"
+#include "../../include/mini_std.h"
 
 #define MAX_STAGE_SLOTS  4
 #define EXFIL_CHUNK_SIZE 65536

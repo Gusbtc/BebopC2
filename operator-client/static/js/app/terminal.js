@@ -2,14 +2,14 @@
 
 // ---- Session WebSocket ----
 
-function connectSessionWs(bid) {
+async function connectSessionWs(bid) {
     if (sessionWs) { sessionWs.close(); sessionWs = null; }
-    const tsUrl = getTsUrl();
-    if (!tsUrl) return;
-    const wsProto = tsUrl.startsWith('https') ? 'wss' : 'ws';
-    const wsHost = tsUrl.replace(/^https?:\/\//, '');
-    const token = localStorage.getItem('authToken') || '';
-    const url = wsProto + '://' + wsHost + '/ws/session/' + bid + '?token=' + encodeURIComponent(token);
+    let url;
+    try {
+        url = await makeWebSocketURL('/ws/session/' + bid);
+    } catch (_) {
+        return;
+    }
     sessionWs = new WebSocket(url);
 
     sessionWs.onmessage = function(event) {
@@ -213,8 +213,8 @@ function _initShellXterm() {
     }
 
     _shellTerm = new Terminal({
-        fontFamily: "'Share Tech Mono', 'Courier New', monospace",
-        fontSize: 14, letterSpacing: 0.5, lineHeight: 1.4,
+        fontFamily: "'JetBrains Mono', 'IBM Plex Mono', 'Cascadia Mono', 'Courier New', monospace",
+        fontSize: 13, letterSpacing: 0.5, lineHeight: 1.4,
         cursorBlink: true, cursorStyle: 'block',
         scrollback: 5000, allowTransparency: true,
         convertEol: true,
@@ -245,17 +245,17 @@ function _initShellXterm() {
     });
 }
 
-function _connectShellWs(bid) {
-    const tsUrl = getTsUrl();
-    if (!tsUrl) return;
-
+async function _connectShellWs(bid) {
     const existing = _shellWsMap.get(bid);
     if (existing && existing.ws && existing.ws.readyState <= WebSocket.OPEN) return;
 
-    const wsProto = tsUrl.startsWith('https') ? 'wss' : 'ws';
-    const wsHost = tsUrl.replace(/^https?:\/\//, '');
-    const token = localStorage.getItem('authToken') || '';
-    const ws = new WebSocket(wsProto + '://' + wsHost + '/ws/shell/' + bid + '?token=' + encodeURIComponent(token));
+    let url;
+    try {
+        url = await makeWebSocketURL('/ws/shell/' + bid);
+    } catch (_) {
+        return;
+    }
+    const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
 
     const entry = { ws: ws, buffer: [], localEcho: false, modeSet: false };
@@ -344,16 +344,25 @@ async function _saveTerminalToServer(id) {
     if (id == null) return;
     const tsUrl = getTsUrl();
     if (!tsUrl) return;
-    const state = _beaconStates[id];
-    if (!state) return;
+    const persistId = _terminalPersistId(id);
+    if (persistId == null || isNaN(persistId)) return;
+    const state = _beaconStates[id] || _beaconStates[persistId] || {};
+    let fileBrowser = state.fileBrowser || null;
+    let sessionFileBrowser = state.sessionFileBrowser || null;
+    if (typeof _fbSerializeForBeacon === 'function') {
+        fileBrowser = _fbSerializeForBeacon(persistId, false) || fileBrowser;
+        sessionFileBrowser = _fbSerializeForBeacon(persistId, true) || sessionFileBrowser;
+    }
     try {
-        await authFetch(tsUrl + '/api/terminal/' + id, {
+        await authFetch(tsUrl + '/api/terminal/' + persistId, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                output_log: state.outputLog,
-                cmd_history: state.cmdHistory,
-                poll_since: state.pollSince,
+                output_log: state.outputLog || [],
+                cmd_history: state.cmdHistory || [],
+                poll_since: state.pollSince || 0,
+                file_browser: fileBrowser,
+                session_file_browser: sessionFileBrowser,
             }),
         });
     } catch (_) {}
@@ -362,19 +371,35 @@ async function _saveTerminalToServer(id) {
 async function _loadTerminalFromServer(id) {
     const tsUrl = getTsUrl();
     if (!tsUrl) return null;
+    const persistId = _terminalPersistId(id);
+    if (persistId == null || isNaN(persistId)) return null;
     try {
-        const resp = await authFetch(tsUrl + '/api/terminal/' + id);
+        const resp = await authFetch(tsUrl + '/api/terminal/' + persistId);
         if (!resp.ok) return null;
         const state = await resp.json();
-        if (!state || !state.output_log) return null;
+        if (!state) return null;
         return {
-            outputLog: state.output_log,
+            outputLog: state.output_log || [],
             cmdHistory: state.cmd_history || [],
             pollSince: state.poll_since || 0,
+            fileBrowser: state.file_browser || null,
+            sessionFileBrowser: state.session_file_browser || null,
         };
     } catch (_) {
         return null;
     }
+}
+
+function _terminalPersistId(id) {
+    if (id == null) return null;
+    if (typeof id === 'string') {
+        if (id.startsWith('fbs_')) return parseInt(id.slice(4), 10);
+        if (id.startsWith('fb_')) return parseInt(id.slice(3), 10);
+        if (id.startsWith('sess_')) return parseInt(id.slice(5), 10);
+        if (id.startsWith('shell_')) return parseInt(id.slice(6), 10);
+        return parseInt(id, 10);
+    }
+    return id;
 }
 
 function _saveTabs() {
@@ -502,6 +527,308 @@ function _replaceBuffer(val) {
     _term.write('\x1b[K' + val);
     _inputBuf  = val;
     _cursorPos = val.length;
+}
+
+function _tokenizeCommandLine(input) {
+    const tokens = [];
+    let current = '';
+    let quote = '';
+    let escape = false;
+
+    for (let i = 0; i < input.length; i++) {
+        const ch = input[i];
+
+        if (escape) {
+            current += ch;
+            escape = false;
+            continue;
+        }
+
+        if (ch === '\\' && quote) {
+            const next = input[i + 1];
+            if (next === quote || next === '\\') {
+                escape = true;
+                continue;
+            }
+        }
+
+        if (quote) {
+            if (ch === quote) {
+                quote = '';
+            } else {
+                current += ch;
+            }
+            continue;
+        }
+
+        if (ch === '"' || ch === '\'') {
+            quote = ch;
+            continue;
+        }
+
+        if (/\s/.test(ch)) {
+            if (current) {
+                tokens.push(current);
+                current = '';
+            }
+            continue;
+        }
+
+        current += ch;
+    }
+
+    if (current || quote) tokens.push(current);
+    return tokens;
+}
+
+function _sliceArgsFromCommand(cmd, tokensConsumed) {
+    let idx = 0;
+    let seen = 0;
+
+    while (idx < cmd.length && /\s/.test(cmd[idx])) idx++;
+    while (idx < cmd.length && !/\s/.test(cmd[idx])) idx++;
+
+    while (idx < cmd.length && seen < tokensConsumed) {
+        while (idx < cmd.length && /\s/.test(cmd[idx])) idx++;
+        if (idx >= cmd.length) break;
+
+        const start = idx;
+        let quote = '';
+        let escape = false;
+
+        while (idx < cmd.length) {
+            const ch = cmd[idx];
+            if (escape) {
+                escape = false;
+                idx++;
+                continue;
+            }
+            if (ch === '\\' && quote) {
+                const next = cmd[idx + 1];
+                if (next === quote || next === '\\') {
+                    escape = true;
+                    idx++;
+                    continue;
+                }
+            }
+            if (quote) {
+                if (ch === quote) quote = '';
+                idx++;
+                continue;
+            }
+            if (ch === '"' || ch === '\'') {
+                quote = ch;
+                idx++;
+                continue;
+            }
+            if (/\s/.test(ch)) break;
+            idx++;
+        }
+
+        if (idx === start) break;
+        seen++;
+    }
+
+    while (idx < cmd.length && /\s/.test(cmd[idx])) idx++;
+    return cmd.slice(idx);
+}
+
+function _parseInlineAssemblyInput(cmd, cmdArgs) {
+    const tokens = _tokenizeCommandLine(cmdArgs);
+    let idx = 0;
+    let mode = 'auto';
+
+    while (idx < tokens.length) {
+        const token = tokens[idx];
+        if (token === '--mode') {
+            idx++;
+            if (idx >= tokens.length) {
+                throw new Error('usage: inline-assembly [--mode auto|bridge] [assembly] [args]');
+            }
+            mode = tokens[idx].toLowerCase();
+            idx++;
+            continue;
+        }
+        if (token.startsWith('--mode=')) {
+            mode = token.slice(7).toLowerCase();
+            idx++;
+            continue;
+        }
+        break;
+    }
+
+    if (!['auto', 'bridge'].includes(mode)) {
+        throw new Error('invalid mode: ' + mode + ' (expected auto or bridge)');
+    }
+
+    const assemblyName = idx < tokens.length ? tokens[idx] : '';
+    const pickerArgs = _sliceArgsFromCommand(cmd, idx);
+    const libraryArgs = assemblyName ? _sliceArgsFromCommand(cmd, idx + 1) : pickerArgs;
+
+    return {
+        mode: mode,
+        assemblyName: assemblyName,
+        pickerArgs: pickerArgs,
+        libraryArgs: libraryArgs,
+    };
+}
+
+function _formatInlineAssemblyOutput(result) {
+    const lines = [
+        '[inline-assembly]',
+        'Exit: ' + String(result.exit_code != null ? result.exit_code : 0),
+        'Duration: ' + String(result.duration_ms || 0) + 'ms',
+        'Truncated: ' + String(!!result.truncated),
+    ];
+
+    if (result.truncated) {
+        lines.push('');
+        lines.push('[warning] output truncated');
+    }
+
+    const sections = [
+        ['STDOUT', result.stdout],
+        ['STDERR', result.stderr],
+        ['EXCEPTION', result.exception],
+        ['DIAGNOSTICS', result.diagnostics],
+    ];
+
+    for (const [name, value] of sections) {
+        if (!value) continue;
+        lines.push('');
+        lines.push(name + ':');
+        lines.push(value);
+    }
+
+    return lines.join('\n');
+}
+
+function _isInlineAssemblyResult(result) {
+    if (!result || result.type !== 15) return false;
+    return !!(
+        result.mode ||
+        result.stdout ||
+        result.stderr ||
+        result.exception ||
+        result.diagnostics ||
+        result.duration_ms ||
+        result.exit_code
+    );
+}
+
+async function queueBOFObjectFile(file, argsText) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) {
+        appendLine('[error] teamserver URL not configured', 'err');
+        return false;
+    }
+    if (beaconId === null || isNaN(_actualBid())) {
+        appendLine('[error] select a beacon first', 'err');
+        return false;
+    }
+    const target = _beacons[_actualBid()];
+    if (target && target.platform === 0) {
+        appendLine('[error] bof is Windows-only', 'err');
+        return false;
+    }
+    if (!file) return false;
+
+    const fd = new FormData();
+    fd.append('beacon_id', String(_actualBid()));
+    fd.append('object', file);
+    fd.append('args', argsText || '');
+
+    const r = await authFetch(tsUrl + '/api/bof', { method: 'POST', body: fd });
+    if (!r.ok) {
+        appendLine('[error] bof failed: ' + (await r.text()), 'err');
+        return false;
+    }
+    const j = await r.json();
+    if (j.label) _tabLabels[j.label] = beaconId;
+    appendLine(`[*] bof queued (label: ${j.label}, object: ${j.obj_size} bytes)`, 'hint');
+    _pendingTasks[beaconId] = (_pendingTasks[beaconId] || 0) + 1;
+    return true;
+}
+
+async function queueBOFObjectName(name, argsText) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) {
+        appendLine('[error] teamserver URL not configured', 'err');
+        return false;
+    }
+    if (beaconId === null || isNaN(_actualBid())) {
+        appendLine('[error] select a beacon first', 'err');
+        return false;
+    }
+    const target = _beacons[_actualBid()];
+    if (target && target.platform === 0) {
+        appendLine('[error] bof-execute is Windows-only', 'err');
+        return false;
+    }
+    const fd = new FormData();
+    fd.append('beacon_id', String(_actualBid()));
+    fd.append('object_name', name);
+    fd.append('args', argsText || '');
+
+    const r = await authFetch(tsUrl + '/api/bof', { method: 'POST', body: fd });
+    if (!r.ok) {
+        appendLine('[error] bof-execute failed: ' + (await r.text()), 'err');
+        return false;
+    }
+    const j = await r.json();
+    if (j.label) _tabLabels[j.label] = beaconId;
+    appendLine(`[*] bof queued (label: ${j.label}, object: ${j.obj_size} bytes)`, 'hint');
+    _pendingTasks[beaconId] = (_pendingTasks[beaconId] || 0) + 1;
+    return true;
+}
+
+function openBOFPicker(argsText, restorePrompt) {
+    let picker = document.getElementById('bof-picker');
+    if (!picker) {
+        picker = document.createElement('input');
+        picker.type = 'file';
+        picker.id = 'bof-picker';
+        picker.accept = '.o,.obj';
+        picker.style.display = 'none';
+        document.body.appendChild(picker);
+    }
+    appendLine('[*] select BOF object file...', 'hint');
+    picker.onchange = async () => {
+        const file = picker.files[0];
+        if (!file) {
+            if (restorePrompt) _writePrompt();
+            return;
+        }
+        try {
+            await queueBOFObjectFile(file, argsText || '');
+        } catch (e) {
+            appendLine('[error] ' + e.message, 'err');
+        } finally {
+            picker.value = '';
+            if (restorePrompt) _writePrompt();
+        }
+    };
+    picker.click();
+}
+
+async function uploadBOFObjectFile(name, file) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl) {
+        appendLine('[error] teamserver URL not configured', 'err');
+        return false;
+    }
+    const fd = new FormData();
+    fd.append('name', name);
+    fd.append('file', file);
+    const r = await authFetch(tsUrl + '/api/library', { method: 'POST', body: fd });
+    if (!r.ok) {
+        appendLine('[error] bof-upload failed: ' + (await r.text()), 'err');
+        return false;
+    }
+    const j = await r.json();
+    appendLine(`[+] bof "${j.name}" uploaded (${j.size} bytes)`, 'hint');
+    if (typeof loadLibraryPanel === 'function') loadLibraryPanel();
+    return true;
 }
 
 function appendLine(text, cls) {
@@ -708,6 +1035,7 @@ async function _processCommand(cmd) {
         getenv:    '<name>',
         'assembly-upload': '<name>',
         'assembly-delete': '<name>',
+        'bof-upload': '<name.o|name.obj>',
     };
     if (NEEDS_ARGS[baseCmd] && !cmdArgs) {
         // cd without args is valid on Linux (goes to $HOME)
@@ -931,6 +1259,153 @@ async function _processCommand(cmd) {
         return;
     }
 
+    if (baseCmd === 'inline-assembly') {
+        if (_isLinux) {
+            appendLine('[error] inline-assembly is Windows-only', 'err');
+            _writePrompt();
+            return;
+        }
+
+        let inlineReq;
+        try {
+            inlineReq = _parseInlineAssemblyInput(cmd, cmdArgs);
+        } catch (e) {
+            appendLine('[error] ' + e.message, 'err');
+            _writePrompt();
+            return;
+        }
+
+        const doInlineExec = async (fd) => {
+            try {
+                const r = await authFetch(tsUrl + '/api/inline-assembly', { method: 'POST', body: fd });
+                if (!r.ok) {
+                    appendLine('[error] inline-assembly failed: ' + (await r.text()), 'err');
+                    _writePrompt();
+                    return;
+                }
+                const j = await r.json();
+                if (j.label) _tabLabels[j.label] = beaconId;
+                appendLine(`[*] inline-assembly queued (label: ${j.label})`, 'hint');
+                _pendingTasks[beaconId] = (_pendingTasks[beaconId] || 0) + 1;
+            } catch (e) {
+                appendLine('[error] ' + e.message, 'err');
+                _writePrompt();
+            }
+        };
+
+        if (inlineReq.assemblyName) {
+            try {
+                const listResp = await authFetch(tsUrl + '/api/assemblies');
+                const assemblies = await listResp.json();
+                const found = assemblies.find(a => a.name.toLowerCase() === inlineReq.assemblyName.toLowerCase());
+                if (found) {
+                    const fd = new FormData();
+                    fd.append('beacon_id', String(_actualBid()));
+                    fd.append('assembly_name', found.name);
+                    fd.append('args', inlineReq.libraryArgs);
+                    fd.append('mode', inlineReq.mode);
+                    await doInlineExec(fd);
+                    return;
+                }
+            } catch (_) {}
+        }
+
+        let picker = document.getElementById('inline-asm-picker');
+        if (!picker) {
+            picker = document.createElement('input');
+            picker.type = 'file';
+            picker.id = 'inline-asm-picker';
+            picker.accept = '.exe,.dll';
+            picker.style.display = 'none';
+            document.body.appendChild(picker);
+        }
+        appendLine('[*] select .NET assembly file for inline execution...', 'hint');
+        picker.onchange = async () => {
+            const file = picker.files[0];
+            if (!file) { _writePrompt(); return; }
+            const fd = new FormData();
+            fd.append('beacon_id', String(_actualBid()));
+            fd.append('assembly', file);
+            fd.append('args', inlineReq.pickerArgs);
+            fd.append('mode', inlineReq.mode);
+            await doInlineExec(fd);
+            picker.value = '';
+        };
+        picker.click();
+        return;
+    }
+
+	if (baseCmd === 'bof-execute') {
+        if (_isLinux) {
+            appendLine('[error] bof-execute is Windows-only', 'err');
+            _writePrompt();
+            return;
+        }
+
+        const parts = cmdArgs.split(/\s+/);
+        const nameOrEmpty = parts[0] || '';
+        const bofArgs = parts.slice(1).join(' ');
+        if (nameOrEmpty && /\.(o|obj)$/i.test(nameOrEmpty)) {
+            try {
+                await queueBOFObjectName(nameOrEmpty, bofArgs);
+            } catch (e) {
+                appendLine('[error] ' + e.message, 'err');
+            }
+            _writePrompt();
+            return;
+        }
+
+        openBOFPicker(cmdArgs, true);
+        return;
+    }
+
+    if (baseCmd === 'bof-upload') {
+        const name = cmdArgs.trim();
+        if (!/\.(o|obj)$/i.test(name)) {
+            appendLine('[error] usage: bof-upload <name.o|name.obj>', 'err');
+            _writePrompt();
+            return;
+        }
+        let picker = document.getElementById('bof-upload-picker');
+        if (!picker) {
+            picker = document.createElement('input');
+            picker.type = 'file';
+            picker.id = 'bof-upload-picker';
+            picker.accept = '.o,.obj';
+            picker.style.display = 'none';
+            document.body.appendChild(picker);
+        }
+        appendLine('[*] select BOF object to upload as "' + name + '"...', 'hint');
+        picker.onchange = async () => {
+            const file = picker.files[0];
+            if (!file) { _writePrompt(); return; }
+            try {
+                await uploadBOFObjectFile(name, file);
+            } catch (e) {
+                appendLine('[error] ' + e.message, 'err');
+            }
+            picker.value = '';
+            _writePrompt();
+        };
+        picker.click();
+        return;
+    }
+
+    if (typeof BUILTIN_BOF_COMMANDS !== 'undefined' && BUILTIN_BOF_COMMANDS.includes(baseCmd)) {
+        if (_isLinux) {
+            appendLine('[error] ' + baseCmd + ' is Windows-only', 'err');
+            _writePrompt();
+            return;
+        }
+        try {
+            await queueBOFObjectName(baseCmd, cmdArgs);
+        } catch (e) {
+            appendLine('[error] ' + e.message, 'err');
+        }
+        _writePrompt();
+        return;
+    }
+
     if (baseCmd === 'assembly-upload') {
         const name = cmdArgs.trim();
         if (!name) { appendLine('[error] usage: assembly-upload <name>', 'err'); _writePrompt(); return; }
@@ -974,6 +1449,39 @@ async function _processCommand(cmd) {
                 for (const a of list) {
                     appendLine(`  ${a.name}  (${a.size} bytes)`, 'info');
                 }
+            }
+        } catch (e) { appendLine('[error] ' + e.message, 'err'); }
+        _writePrompt();
+        return;
+    }
+
+    if (baseCmd === 'bof-list') {
+        try {
+            const r = await authFetch(tsUrl + '/api/library');
+            if (!r.ok) {
+                appendLine('[error] bof-list failed: ' + (await r.text()), 'err');
+                _writePrompt();
+                return;
+            }
+            const files = await r.json();
+            const bofs = (Array.isArray(files) ? files : []).filter(f => String(f.kind || '').toLowerCase() === 'bof');
+            const operatorBofs = bofs.filter(f => String(f.source || '').toLowerCase() !== 'builtin');
+            const builtinBofs = bofs.filter(f => String(f.source || '').toLowerCase() === 'builtin');
+            const sizeText = (f) => (typeof formatBytes === 'function') ? formatBytes(f.size || 0) : ((f.size || 0) + ' bytes');
+            const printGroup = (title, list) => {
+                if (!list.length) return;
+                appendLine(title + ':', 'info');
+                for (const f of list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))) {
+                    const file = f.file && f.file !== f.name ? `  [${f.file}]` : '';
+                    appendLine(`  ${f.name}${file}  (${sizeText(f)})`, 'info');
+                }
+            };
+
+            if (!bofs.length) {
+                appendLine('(no BOFs in library)', 'hint');
+            } else {
+                printGroup('Operator BOFs', operatorBofs);
+                printGroup('Built-in BOFs', builtinBofs);
             }
         } catch (e) { appendLine('[error] ' + e.message, 'err'); }
         _writePrompt();
@@ -1052,8 +1560,8 @@ function _initXterm(containerId) {
     }
 
     const term = new Terminal({
-        fontFamily:        "'Share Tech Mono', 'Courier New', monospace",
-        fontSize:          14,
+        fontFamily:        "'JetBrains Mono', 'IBM Plex Mono', 'Cascadia Mono', 'Courier New', monospace",
+        fontSize:          13,
         letterSpacing:     0.5,
         lineHeight:        1.4,
         cursorBlink:       true,
@@ -1149,6 +1657,8 @@ async function pollResults() {
             } else if (r.type === 2) {
                 appendLine('[+] ' + (r.output || 'config updated'), 'hint');
                 loadSessions();
+            } else if (_isInlineAssemblyResult(r)) {
+                appendLine(_formatInlineAssemblyOutput(r), 'output');
             } else {
                 appendLine(r.output || '', 'output');
             }
@@ -1200,7 +1710,6 @@ function _renderTabs() {
         }
         el.addEventListener('click', (e) => {
             if (e.target.classList.contains('terminal-tab-close')) return;
-            console.log('[tab-click] id:', id, 'current beaconId:', beaconId, 'same?', id === beaconId);
             _switchTab(id);
         });
         el.querySelector('.terminal-tab-close').addEventListener('click', (e) => {
@@ -1212,7 +1721,6 @@ function _renderTabs() {
 }
 
 async function _switchTab(id) {
-    console.log('[switchTab] id:', id, 'beaconId:', beaconId, 'blocked?', id === beaconId);
     if (id === beaconId) return;
     const oldId = beaconId;
     const oldIsShell = typeof oldId === 'string' && oldId.startsWith('shell_');
@@ -1244,11 +1752,18 @@ async function _switchTab(id) {
         const bid = _fbTabBid(id);
         const isSession = typeof id === 'string' && id.startsWith('fbs_');
         const state = _fbGetState(bid, id, isSession);
-        if (!state.tree[state.root]) {
-            state.expanded.add(state.root);
-            _fbSendTask(bid, state.root, isSession);
+        const renderFileBrowser = function() {
+            if (!state.tree[state.root]) {
+                state.expanded.add(state.root);
+                _fbSendTask(bid, state.root, isSession);
+            }
+            _fbRender(bid, id);
+        };
+        if (typeof _fbRestoreFromServer === 'function') {
+            _fbRestoreFromServer(bid, id, isSession).finally(renderFileBrowser);
+        } else {
+            renderFileBrowser();
         }
-        _fbRender(bid, id);
     } else if (newIsShell) {
         // Switching TO a shell tab
         const tab = _openTabs.get(id);
@@ -1368,12 +1883,10 @@ function _closeTab(id) {
 }
 
 async function openTerminal(id) {
-    console.log('[bebop] openTerminal called with id:', id, 'type:', typeof id);
     const isSession = typeof id === 'string' && id.startsWith('sess_');
     const actualId = isSession ? parseInt(id.slice(5), 10) : id;
 
     if (!_term) _initXterm('terminal');
-    console.log('[bebop] _term after init:', !!_term);
 
     if (_openTabs.has(id)) {
         _switchTab(id);

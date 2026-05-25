@@ -17,8 +17,9 @@
 static char *_exec_read_pipe(int pipefd_read, pid_t pid, size_t *out_len) {
     size_t buf_cap = 4096;
     size_t buf_len = 0;
-    char *buf = malloc(buf_cap);
+    char *buf = malloc(buf_cap + 1);
     if (!buf) { close(pipefd_read); *out_len = 0; return NULL; }
+    buf[0] = '\0';
 
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -45,7 +46,7 @@ static char *_exec_read_pipe(int pipefd_read, pid_t pid, size_t *out_len) {
         if (space < 4096) {
             buf_cap *= 2;
             if (buf_cap > MAX_CMD_OUTPUT + 4096) buf_cap = MAX_CMD_OUTPUT + 4096;
-            char *nb = realloc(buf, buf_cap);
+            char *nb = realloc(buf, buf_cap + 1);
             if (!nb) break;
             buf = nb;
             space = buf_cap - buf_len;
@@ -54,6 +55,7 @@ static char *_exec_read_pipe(int pipefd_read, pid_t pid, size_t *out_len) {
         ssize_t n = read(pipefd_read, buf + buf_len, space);
         if (n <= 0) break;
         buf_len += (size_t)n;
+        buf[buf_len] = '\0';
     }
 
     if (timed_out) {
@@ -64,9 +66,10 @@ static char *_exec_read_pipe(int pipefd_read, pid_t pid, size_t *out_len) {
         char tmsg[ENC_LX_CMD_TIMEOUT_LEN + 1];
         xor_dec(tmsg, ENC_LX_CMD_TIMEOUT, ENC_LX_CMD_TIMEOUT_LEN);
         size_t tlen = ENC_LX_CMD_TIMEOUT_LEN;
-        if (buf_len + tlen < buf_cap) {
+        if (buf_len + tlen <= buf_cap) {
             memcpy(buf + buf_len, tmsg, tlen);
             buf_len += tlen;
+            buf[buf_len] = '\0';
         }
     } else {
         for (;;) {
@@ -76,17 +79,19 @@ static char *_exec_read_pipe(int pipefd_read, pid_t pid, size_t *out_len) {
             if (buf_len + (size_t)n <= MAX_CMD_OUTPUT) {
                 if (buf_len + (size_t)n > buf_cap) {
                     buf_cap = buf_len + (size_t)n + 1;
-                    char *nb = realloc(buf, buf_cap);
+                    char *nb = realloc(buf, buf_cap + 1);
                     if (nb) buf = nb; else break;
                 }
                 memcpy(buf + buf_len, tmp, n);
                 buf_len += (size_t)n;
+                buf[buf_len] = '\0';
             }
         }
         waitpid(pid, NULL, 0);
     }
 
     close(pipefd_read);
+    buf[buf_len] = '\0';
     *out_len = buf_len;
     return buf;
 }

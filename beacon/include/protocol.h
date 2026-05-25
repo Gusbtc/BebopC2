@@ -24,6 +24,8 @@
 
 #define TASK_EXEC_ASSEMBLY  14
 #define CODE_EXEC_ASSEMBLY  0
+#define TASK_BOF            16
+#define CODE_BOF            0
 
 /* Connection types for TCP handshake */
 #define CONN_SESSION  0

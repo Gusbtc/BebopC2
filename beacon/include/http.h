@@ -28,6 +28,10 @@ int do_checkin(uint32_t beacon_id, uint8_t *out_buf, DWORD *out_len);
    Returns 0 on success, -1 on error. */
 int send_result(uint32_t beacon_id, uint32_t label, uint16_t flags,
                 const char *output, const uint8_t session_key[32]);
+int send_result_typed(uint32_t beacon_id, uint32_t label,
+                      uint8_t type, uint8_t code, uint16_t flags,
+                      const char *output, uint32_t output_len,
+                      const uint8_t session_key[32]);
 
 /* send_result_raw: like send_result but sends arbitrary binary data with
    explicit type, flags, and identifier. Used for fragmented file transfers.

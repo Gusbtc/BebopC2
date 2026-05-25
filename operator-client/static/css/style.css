@@ -16,6 +16,9 @@
     --border-amber: rgba(255, 176, 0, 0.3);
     --border-orange: rgba(200, 75, 49, 0.4);
     --terminal-height: 40vh;
+    --font-body:    'Inter', system-ui, sans-serif;
+    --font-mono:    'JetBrains Mono', 'IBM Plex Mono', 'Cascadia Mono', 'Courier New', monospace;
+    --font-display: 'Bebas Neue', sans-serif;
 }
 
 html { height: 100%; overflow: hidden; }
@@ -26,8 +29,8 @@ body {
         radial-gradient(ellipse at 20% 50%, rgba(13,27,42,0.4) 0%, transparent 60%),
         radial-gradient(ellipse at 80% 20%, rgba(74,144,164,0.03) 0%, transparent 40%);
     color: var(--text);
-    font-family: 'Inter', sans-serif;
-    font-size: 14px;
+    font-family: var(--font-body);
+    font-size: 13.5px;
     height: 100vh;
     overflow: hidden;
     display: flex;
@@ -70,7 +73,7 @@ header {
 
 /* ---- LOGO ---- */
 .logo {
-    font-family: 'Bebas Neue', sans-serif;
+    font-family: var(--font-display);
     font-size: 22px;
     color: var(--amber);
     letter-spacing: 4px;
@@ -83,8 +86,8 @@ nav { display: flex; gap: 0; }
 
 nav a {
     color: var(--text-dim);
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 11px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
     letter-spacing: 2.5px;
     text-transform: uppercase;
     padding: 6px 18px;
@@ -102,8 +105,8 @@ nav a.active { color: var(--amber); }
     display: flex;
     align-items: center;
     gap: 7px;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 10px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
     letter-spacing: 2px;
     text-transform: uppercase;
     color: var(--text-dim);
@@ -133,7 +136,7 @@ nav a.active { color: var(--amber); }
 
 .settings label {
     color: var(--text-dim);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     letter-spacing: 2px;
     text-transform: uppercase;
@@ -145,7 +148,7 @@ nav a.active { color: var(--amber); }
     border-radius: 0;
     color: var(--text);
     padding: 4px 9px;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
     transition: border-color 0.15s;
 }
@@ -164,7 +167,7 @@ button {
     color: var(--orange);
     cursor: pointer;
     padding: 4px 16px;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     letter-spacing: 2px;
     text-transform: uppercase;
@@ -222,7 +225,7 @@ main {
 
 /* ---- HEADINGS ---- */
 h2 {
-    font-family: 'Bebas Neue', sans-serif;
+    font-family: var(--font-display);
     font-size: 20px;
     font-weight: 400;
     color: var(--amber);
@@ -242,7 +245,7 @@ h2::after {
 
 .count-minimal {
     color: var(--text-dim);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
     margin-left: 10px;
     opacity: 0.7;
@@ -250,7 +253,7 @@ h2::after {
 
 /* ---- STATUS BADGES ---- */
 .card-badge {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     letter-spacing: 2px;
     text-transform: uppercase;
@@ -267,7 +270,7 @@ h2::after {
     border: 1px solid var(--border-amber);
     border-radius: 0;
     color: var(--amber);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px !important;
     letter-spacing: 2px;
     padding: 6px 14px !important;
@@ -290,7 +293,7 @@ h2::after {
     border: 1px solid rgba(200, 75, 49, 0.28);
     border-radius: 0;
     color: var(--orange);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px !important;
     letter-spacing: 2px;
     padding: 6px 14px !important;
@@ -314,7 +317,7 @@ h2::after {
     border: 1px solid rgba(122, 138, 122, 0.28);
     border-radius: 0;
     color: var(--text-dim);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px !important;
     letter-spacing: 2px;
     padding: 6px 14px !important;
@@ -335,7 +338,7 @@ h2::after {
 /* ---- EMPTY STATE ---- */
 #no-sessions, #no-listeners {
     color: var(--text-dim);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 14px;
     margin-top: 32px;
     padding: 60px;
@@ -355,7 +358,7 @@ h2::after {
 
 /* Force mono on all technical elements */
 input, select, textarea, button, label {
-    font-family: 'Share Tech Mono', monospace !important;
+    font-family: var(--font-mono) !important;
 }
 
 /* Fix radio buttons visibility and clickability */
@@ -401,13 +404,13 @@ input[type="radio"]:hover, input[type="checkbox"]:hover {
 }
 
 ::placeholder {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     opacity: 0.3;
 }
 
 .hint, .form-row .hint {
     display: block;
-    font-family: 'Share Tech Mono', monospace !important;
+    font-family: var(--font-mono) !important;
     font-size: 11px;
     color: var(--text-dim);
     margin-top: 5px;
@@ -459,7 +462,7 @@ input[type="radio"]:hover, input[type="checkbox"]:hover {
 }
 
 .terminal-topbar-title {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-dim);
     letter-spacing: 2px;
@@ -486,7 +489,7 @@ input[type="radio"]:hover, input[type="checkbox"]:hover {
     background: transparent;
     border: 1px solid rgba(255, 176, 0, 0.2);
     color: var(--amber);
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-body);
     font-size: 16px;
     font-weight: 500;
     line-height: 1;
@@ -529,7 +532,7 @@ input[type="radio"]:hover, input[type="checkbox"]:hover {
 }
 
 .terminal-tab-name {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-dim);
     letter-spacing: 1px;
@@ -565,7 +568,7 @@ input[type="radio"]:hover, input[type="checkbox"]:hover {
 }
 
 .terminal-placeholder span {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text-dim);
     opacity: 0.25;
@@ -588,7 +591,7 @@ body.panel-open .terminal-placeholder {
 .back {
     color: var(--text-dim);
     text-decoration: none;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     letter-spacing: 2px;
     text-transform: uppercase;
@@ -605,7 +608,7 @@ body.panel-open .terminal-placeholder {
 
 .beacon-info {
     color: var(--text-dim);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     letter-spacing: 0.5px;
     overflow: hidden;
@@ -614,7 +617,7 @@ body.panel-open .terminal-placeholder {
 }
 
 .session-elapsed {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-dim);
     letter-spacing: 2px;
@@ -680,7 +683,7 @@ body.panel-open .terminal-placeholder {
 
 .form-row label {
     color: var(--text-dim);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
     letter-spacing: 2px;
     text-transform: uppercase;
@@ -695,7 +698,7 @@ body.panel-open .terminal-placeholder {
     border-radius: 0;
     box-sizing: border-box;
     color: var(--text);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 16px;
     padding: 7px 10px;
     width: 100%;
@@ -733,7 +736,7 @@ input[type="number"] {
 
 .form-row .hint {
     color: var(--text-dim);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
 }
 
@@ -757,7 +760,7 @@ input[type="number"] {
 }
 
 .sleep-label {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-dim);
     text-transform: uppercase;
@@ -770,7 +773,7 @@ input[type="number"] {
     border-radius: 0;
     color: var(--amber);
     cursor: pointer;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     letter-spacing: 3px;
     padding: 10px 28px;
@@ -790,7 +793,7 @@ input[type="number"] {
 
 .build-status {
     margin-top: 14px;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     min-height: 20px;
     text-align: center;
@@ -811,8 +814,8 @@ input[type="number"] {
 #beacons-table, .listeners-table {
     width: 100%;
     border-collapse: collapse;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 14px;
+    font-family: var(--font-mono);
+    font-size: 13px;
     text-align: left;
     table-layout: fixed;
 }
@@ -835,7 +838,7 @@ input[type="number"] {
     padding: 12px 16px;
     border-bottom: 1px solid var(--border-amber);
     font-weight: 500;
-    font-size: 13px;
+    font-size: 12px;
 }
 
 #beacons-table td, .listeners-table td {
@@ -847,6 +850,32 @@ input[type="number"] {
 
 #beacons-table tr:hover td, .listeners-table tr:hover td {
     background: rgba(255, 176, 0, 0.03);
+}
+
+#beacons-table tr.sessions-empty-row:hover td {
+    background: transparent;
+}
+
+#beacons-table .sessions-empty-cell {
+    height: 96px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 12px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+}
+
+#beacons-table .sessions-empty-cell span,
+#beacons-table .sessions-empty-cell small {
+    display: block;
+}
+
+#beacons-table .sessions-empty-cell small {
+    margin-top: 8px;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: none;
 }
 
 #beacons-table .status-cell {
@@ -865,7 +894,7 @@ input[type="number"] {
 
 .listener-badge {
     display: inline-block;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     letter-spacing: 2px;
     text-transform: uppercase;
@@ -884,7 +913,7 @@ input[type="number"] {
     border: 1px solid rgba(200, 75, 49, 0.22);
     border-radius: 0;
     color: rgba(200, 75, 49, 0.6);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     letter-spacing: 1.5px;
     padding: 4px 12px;
@@ -953,7 +982,7 @@ input[type="number"] {
 }
 
 .node-label {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 500;
     color: var(--text);
@@ -975,6 +1004,18 @@ input[type="number"] {
 
 .node-victim.linux .node-icon {
     background-image: url('/static/img/linux-victim.png');
+    width: 130px;
+    height: 130px;
+}
+
+.node-victim.windows-system .node-icon {
+    background-image: url('/static/img/windows-system.png');
+    width: 130px;
+    height: 130px;
+}
+
+.node-victim.linux-root .node-icon {
+    background-image: url('/static/img/linux-root.png');
     width: 130px;
     height: 130px;
 }
@@ -1009,7 +1050,7 @@ input[type="number"] {
 
 .context-item {
     padding: 8px 16px;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text);
     cursor: pointer;
@@ -1106,11 +1147,11 @@ input[type="number"] {
     padding: 28px 32px;
     max-width: 420px;
     width: 90%;
-    font-family: 'Share Tech Mono', monospace; /* Adicionado */
+    font-family: var(--font-mono); /* Adicionado */
 }
 
 .modal-title {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     color: var(--orange);
     font-size: 11px;
     text-transform: uppercase;
@@ -1120,7 +1161,7 @@ input[type="number"] {
 }
 
 .modal-body {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     color: var(--text);
     font-size: 14px;
     line-height: 1.6;
@@ -1128,7 +1169,7 @@ input[type="number"] {
 }
 
 .modal-btn-cancel, .modal-btn-confirm {
-    font-family: 'Share Tech Mono', monospace !important;
+    font-family: var(--font-mono) !important;
     background: transparent;
     border: 1px solid var(--border);
     color: var(--text-dim);
@@ -1179,7 +1220,7 @@ input[type="number"] {
 }
 
 .window-title {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     color: var(--amber);
     font-size: 13px;
     letter-spacing: 2px;
@@ -1219,7 +1260,7 @@ input[type="number"] {
 
 #create-status:empty { display: none; }
 #create-status {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     letter-spacing: 1px;
     color: var(--orange);
@@ -1234,7 +1275,7 @@ input[type="number"] {
     background: rgba(0,0,0,0.5);
     border: 1px solid var(--border);
     color: var(--text);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     padding: 8px;
     width: 100%;
@@ -1247,7 +1288,7 @@ input[type="number"] {
     background: rgba(0,0,0,0.5);
     border: 1px solid var(--border);
     color: var(--text);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 14px;
     padding: 6px 10px;
     width: 100%;
@@ -1317,7 +1358,7 @@ input[type="number"] {
     border: 1px solid #c84b31;
     padding: 2px 12px;
     cursor: pointer;
-    font-family: 'Share Tech Mono', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     letter-spacing: 0.05em;
     transition: background 0.15s, color 0.15s;
@@ -1362,7 +1403,7 @@ input[type="number"] {
 }
 
 .event-log-topbar-title {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-dim);
     letter-spacing: 2px;
@@ -1371,7 +1412,7 @@ input[type="number"] {
 }
 
 .event-log-count {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-dim);
     opacity: 0.5;
@@ -1384,7 +1425,7 @@ input[type="number"] {
     background: transparent;
     border: 1px solid rgba(255, 176, 0, 0.2);
     color: var(--amber);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 9px;
     letter-spacing: 1.5px;
     text-transform: uppercase;
@@ -1421,8 +1462,8 @@ input[type="number"] {
     display: flex;
     gap: 10px;
     padding: 3px 14px;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 14px;
+    font-family: var(--font-mono);
+    font-size: 13px;
     line-height: 1.5;
     animation: log-entry-in 0.25s ease both;
 }
@@ -1470,7 +1511,7 @@ input[type="number"] {
 
 .event-log-empty {
     padding: 20px 14px;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-dim);
     opacity: 0.4;
@@ -1504,7 +1545,7 @@ input[type="number"] {
     cursor: pointer;
     border-right: 1px solid rgba(30, 45, 61, 0.5);
     transition: background 0.12s;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-dim);
     letter-spacing: 1px;
@@ -1562,6 +1603,665 @@ input[type="number"] {
 .loot-rm-btn:hover {
     border-color: var(--orange);
     color: var(--orange);
+}
+
+#library-log-body {
+    padding: 0;
+}
+
+.mcp-main {
+    gap: 0;
+    padding: 26px 28px 32px;
+}
+
+.mcp-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+
+.mcp-page-header h2 {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.mcp-page-body {
+    min-height: 0;
+}
+
+.mcp-refresh-btn {
+    min-height: 28px;
+    border: 1px solid rgba(255, 176, 0, 0.35);
+    background: transparent;
+    color: var(--amber);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    padding: 6px 14px;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.mcp-refresh-btn:hover {
+    border-color: var(--amber);
+    background: rgba(255, 176, 0, 0.08);
+    color: var(--text);
+}
+
+.mcp-panel {
+    padding: 10px 12px 12px 14px;
+    font-family: var(--font-mono);
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.94);
+    min-width: 0;
+}
+
+.mcp-page-body .mcp-panel {
+    min-height: 480px;
+    padding: 0;
+    border: 1px solid rgba(255, 176, 0, 0.22);
+    background: #000000;
+}
+
+.mcp-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.mcp-page-body .mcp-layout {
+    display: grid;
+    grid-template-columns: minmax(420px, 1.24fr) minmax(320px, 0.76fr);
+    gap: 0;
+    align-items: stretch;
+    border-top: 1px solid rgba(30, 45, 61, 0.85);
+}
+
+.mcp-tools-column,
+.mcp-setup-column {
+    min-width: 0;
+}
+
+.mcp-page-body .mcp-setup-column {
+    padding: 18px;
+    border-right: 1px solid rgba(30, 45, 61, 0.85);
+}
+
+.mcp-page-body .mcp-tools-column {
+    padding: 18px;
+    background:
+        linear-gradient(90deg, rgba(255, 176, 0, 0.035) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(255, 176, 0, 0.02), transparent 150px);
+    background-size: 18px 18px, 100% 100%;
+}
+
+.mcp-status-strip {
+    display: grid;
+    grid-template-columns: 120px minmax(220px, 1fr) 140px 140px;
+    border-top: 1px solid rgba(30, 45, 61, 0.85);
+    border-left: 1px solid rgba(30, 45, 61, 0.85);
+}
+
+.mcp-page-body .mcp-status-strip {
+    border-top: 0;
+    border-left: 0;
+}
+
+.mcp-status-item {
+    min-width: 0;
+    padding: 12px 14px;
+    border-right: 1px solid rgba(30, 45, 61, 0.85);
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.mcp-status-item span {
+    display: block;
+    margin-bottom: 6px;
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 9px;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+}
+
+.mcp-status-item strong {
+    display: block;
+    color: var(--amber);
+    font-size: 11.5px;
+    font-weight: 400;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.mcp-state-ok strong {
+    color: #00e676;
+}
+
+.mcp-state-warn strong {
+    color: var(--amber);
+}
+
+.mcp-grid {
+    display: grid;
+    grid-template-columns: minmax(72px, 0.34fr) minmax(0, 1fr);
+    border-top: 1px solid rgba(30, 45, 61, 0.75);
+    border-left: 1px solid rgba(30, 45, 61, 0.75);
+    margin-bottom: 12px;
+}
+
+.mcp-label,
+.mcp-value {
+    min-width: 0;
+    padding: 6px 8px;
+    border-right: 1px solid rgba(30, 45, 61, 0.75);
+    border-bottom: 1px solid rgba(30, 45, 61, 0.75);
+    font-size: 11px;
+    line-height: 1.35;
+    font-variant-numeric: tabular-nums;
+}
+
+.mcp-label {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    background: rgba(255, 176, 0, 0.035);
+}
+
+.mcp-value {
+    color: var(--amber);
+    overflow-wrap: anywhere;
+}
+
+.mcp-tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+}
+
+.mcp-page-body .mcp-tools-grid {
+    gap: 12px;
+    height: 100%;
+}
+
+.mcp-tool-group {
+    min-width: 0;
+    border: 1px solid rgba(30, 45, 61, 0.65);
+    background: rgba(0, 0, 0, 0.72);
+}
+
+.mcp-section-title {
+    margin: 0;
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(255, 176, 0, 0.18);
+    color: var(--text-dim);
+    font-size: 10.5px;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+}
+
+.mcp-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.mcp-section-head .mcp-section-title {
+    flex: 1;
+    padding: 0 0 6px;
+    margin-bottom: 0;
+}
+
+.mcp-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border: 0;
+    background: rgba(0, 0, 0, 0.7);
+}
+
+.mcp-list li,
+.mcp-list-empty {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(30, 45, 61, 0.45);
+    color: var(--text);
+    font-size: 11.5px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+}
+
+.mcp-list li:last-child {
+    border-bottom: 0;
+}
+
+.mcp-list-empty {
+    border: 1px solid rgba(30, 45, 61, 0.65);
+    color: var(--text-dim);
+    opacity: 0.6;
+    background: rgba(0, 0, 0, 0.7);
+}
+
+.mcp-prompt {
+    width: 100%;
+    min-height: 188px;
+    resize: vertical;
+    box-sizing: border-box;
+    border: 1px solid rgba(255, 176, 0, 0.24);
+    background:
+        linear-gradient(180deg, rgba(255, 176, 0, 0.05), transparent 120px),
+        #000000;
+    color: var(--text);
+    padding: 14px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.55;
+    outline: none;
+    white-space: pre;
+    overflow: auto;
+}
+
+.mcp-prompt:focus {
+    border-color: rgba(255, 176, 0, 0.55);
+}
+
+.mcp-copy-btn {
+    margin-top: 0;
+    width: auto;
+    min-height: 28px;
+    border: 1px solid rgba(255, 176, 0, 0.35);
+    background: transparent;
+    color: var(--amber);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.mcp-copy-btn:hover {
+    border-color: var(--amber);
+    background: rgba(255, 176, 0, 0.08);
+    color: var(--text);
+}
+
+.mcp-page-body .mcp-prompt {
+    min-height: 382px;
+    font-size: 11.5px;
+}
+
+.mcp-token-card {
+    margin-top: 12px;
+    border: 1px solid rgba(30, 45, 61, 0.78);
+    background: rgba(0, 0, 0, 0.7);
+    padding: 10px;
+}
+
+.mcp-token-card .mcp-section-head {
+    margin-bottom: 8px;
+}
+
+.mcp-token-input {
+    width: 100%;
+    min-height: 30px;
+    border: 1px solid rgba(255, 176, 0, 0.22);
+    background: rgba(255, 176, 0, 0.035);
+    color: var(--amber);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.35;
+    outline: none;
+    padding: 7px 9px;
+    cursor: pointer;
+}
+
+.mcp-token-input:focus {
+    border-color: rgba(255, 176, 0, 0.55);
+}
+
+.mcp-token-input:disabled {
+    color: rgba(255, 255, 255, 0.45);
+    cursor: not-allowed;
+}
+
+.mcp-token-toggle {
+    min-height: 26px;
+    border: 1px solid rgba(255, 176, 0, 0.35);
+    background: transparent;
+    color: var(--amber);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 1.2px;
+    padding: 5px 10px;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.mcp-token-toggle:hover:not(:disabled) {
+    border-color: var(--amber);
+    background: rgba(255, 176, 0, 0.08);
+    color: var(--text);
+}
+
+.mcp-token-toggle:disabled {
+    color: rgba(255, 255, 255, 0.45);
+    cursor: not-allowed;
+}
+
+.mcp-empty-state {
+    display: flex;
+    min-height: 220px;
+    flex-direction: column;
+    justify-content: center;
+    border: 1px solid rgba(30, 45, 61, 0.75);
+    padding: 18px;
+    text-align: center;
+}
+
+.mcp-page-body .mcp-empty-state {
+    min-height: 420px;
+    border: 0;
+}
+
+.mcp-empty-title {
+    color: var(--amber);
+    font-size: 12px;
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+}
+
+.mcp-empty-copy {
+    margin-top: 8px;
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 11px;
+}
+
+.library-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 42px;
+    padding: 7px 12px 7px 14px;
+    border-bottom: 1px solid rgba(30, 45, 61, 0.5);
+    font-family: var(--font-mono);
+}
+
+.library-toolbar-copy {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+}
+
+.library-toolbar-title {
+    color: var(--text);
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.library-toolbar-meta {
+    color: var(--text-dim);
+    opacity: 0.55;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.library-upload-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    background: transparent;
+    border: 1px solid rgba(255, 176, 0, 0.35);
+    color: var(--amber);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    height: 28px;
+    min-width: 96px;
+    padding: 0 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.library-upload-btn:hover {
+    border-color: var(--amber);
+    background: rgba(255, 176, 0, 0.08);
+}
+
+.library-table-head,
+.library-row {
+    display: grid;
+    grid-template-columns: 82px 54px minmax(0, 1fr) 88px 34px;
+    align-items: center;
+    column-gap: 10px;
+    padding: 0 12px 0 14px;
+    font-family: var(--font-mono);
+}
+
+.library-table-head {
+    height: 26px;
+    border-bottom: 1px solid rgba(30, 45, 61, 0.35);
+    color: var(--text-dim);
+    opacity: 0.5;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.library-section-label {
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px 0 14px;
+    border-bottom: 1px solid rgba(30, 45, 61, 0.22);
+    border-left: 2px solid rgba(255, 176, 0, 0.75);
+    color: var(--text);
+    background: rgba(255, 176, 0, 0.03);
+    font-family: var(--font-mono);
+}
+
+.library-section-title {
+    color: #f2f5f8;
+    font-size: 13px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.library-section-empty {
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px 0 14px;
+    border-bottom: 1px solid rgba(30, 45, 61, 0.22);
+    color: var(--text-dim);
+    opacity: 0.55;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.library-table-head span:nth-child(4) {
+    text-align: right;
+}
+
+.library-row {
+    min-height: 44px;
+    border-bottom: 1px solid rgba(30, 45, 61, 0.22);
+    animation: log-entry-in 0.25s ease both;
+}
+
+.library-row:hover {
+    background: rgba(255, 176, 0, 0.04);
+}
+
+.library-row-builtin {
+    background: rgba(120, 220, 232, 0.025);
+}
+
+.library-source {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 74px;
+    height: 20px;
+    border: 1px solid rgba(255, 176, 0, 0.24);
+    color: rgba(255, 176, 0, 0.78);
+    background: rgba(255, 176, 0, 0.04);
+    font-size: 9px;
+    line-height: 1;
+    letter-spacing: 0.7px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.library-source-builtin {
+    border-color: rgba(120, 220, 232, 0.32);
+    color: #78dce8;
+    background: rgba(120, 220, 232, 0.05);
+}
+
+.library-kind {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 20px;
+    border: 1px solid rgba(255, 176, 0, 0.25);
+    color: var(--amber);
+    background: rgba(255, 176, 0, 0.05);
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: 0.6px;
+    font-variant-numeric: tabular-nums;
+}
+
+.library-kind-bof {
+    border-color: rgba(120, 220, 232, 0.35);
+    color: #78dce8;
+    background: rgba(120, 220, 232, 0.05);
+}
+
+.library-name {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.library-name-primary,
+.library-name-secondary {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.library-name-primary {
+    color: #f2f5f8;
+    font-size: 12px;
+}
+
+.library-name-secondary {
+    color: var(--text-dim);
+    opacity: 0.58;
+    font-size: 10px;
+}
+
+.library-size {
+    color: var(--text-dim);
+    opacity: 0.6;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.library-actions {
+    display: flex;
+    justify-content: flex-end;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.library-row:hover .library-actions,
+.library-row-builtin .library-actions {
+    opacity: 1;
+}
+
+.library-fixed {
+    border: 1px solid rgba(120, 220, 232, 0.24);
+    color: rgba(120, 220, 232, 0.62);
+    width: 26px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+@media (max-width: 760px) {
+    .mcp-page-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .mcp-page-body .mcp-panel {
+        padding: 0;
+    }
+
+    .mcp-status-strip {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .mcp-page-body .mcp-setup-column,
+    .mcp-page-body .mcp-tools-column {
+        padding: 12px;
+        border-right: 0;
+    }
+
+    .mcp-page-body .mcp-tools-column {
+        border-top: 1px solid rgba(30, 45, 61, 0.85);
+    }
+
+    .mcp-page-body .mcp-layout,
+    .mcp-page-body .mcp-tools-grid {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .mcp-page-body .mcp-prompt {
+        min-height: 240px;
+    }
+
+    .library-table-head,
+    .library-row {
+        grid-template-columns: 54px 50px minmax(0, 1fr) 34px;
+    }
+
+    .library-table-head span:nth-child(4),
+    .library-size {
+        display: none;
+    }
+
+    .library-source {
+        width: 54px;
+        font-size: 8px;
+        letter-spacing: 0;
+    }
+
 }
 
 @keyframes log-entry-in {
@@ -1624,7 +2324,7 @@ input[type="number"] {
 }
 
 .toast-title {
-    font-family: 'Bebas Neue', sans-serif;
+    font-family: var(--font-display);
     font-size: 14px;
     color: var(--amber);
     letter-spacing: 2px;
@@ -1632,13 +2332,13 @@ input[type="number"] {
 }
 
 .toast-body {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text);
 }
 
 .toast-quote {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-dim);
     opacity: 0.4;
@@ -1652,7 +2352,7 @@ input[type="number"] {
     color: #AFA9EC;
     border: 1px solid rgba(175, 169, 236, 0.4);
     background: rgba(175, 169, 236, 0.08);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     padding: 1px 6px;
     text-transform: uppercase;
@@ -1669,7 +2369,7 @@ input[type="number"] {
     color: #ffb000;
     border: 1px solid rgba(255, 176, 0, 0.3);
     background: rgba(255, 176, 0, 0.06);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     padding: 1px 6px;
     text-transform: uppercase;
@@ -1685,7 +2385,7 @@ input[type="number"] {
     color: #AFA9EC;
     border: 1px solid rgba(175, 169, 236, 0.4);
     background: rgba(175, 169, 236, 0.08);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     padding: 3px 10px;
     cursor: pointer;
@@ -1706,7 +2406,7 @@ input[type="number"] {
     color: #c84b31;
     border: 1px solid rgba(200, 75, 49, 0.4);
     background: rgba(200, 75, 49, 0.08);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     padding: 1px 6px;
     text-transform: uppercase;
@@ -1729,7 +2429,7 @@ input[type="number"] {
     color: #00d4aa;
     border: 1px solid rgba(0, 212, 170, 0.4);
     background: rgba(0, 212, 170, 0.08);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     padding: 1px 6px;
     text-transform: uppercase;
@@ -1797,7 +2497,7 @@ body.terminal-fullscreen #shell-terminal {
     margin-left: 14px;
     padding: 4px 10px 4px 14px;
     color: rgba(255, 255, 255, 0.55);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     letter-spacing: 2.5px;
     text-transform: uppercase;
@@ -1861,7 +2561,7 @@ body.terminal-fullscreen #shell-terminal {
     background: transparent;
     border: 1px solid transparent;
     color: rgba(255, 255, 255, 0.55);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     letter-spacing: 2.5px;
     text-transform: uppercase;
@@ -1937,7 +2637,7 @@ body.terminal-fullscreen #shell-terminal {
     background: rgba(10, 14, 26, 0.98);
     border: 1px solid var(--border-amber);
     color: var(--amber);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     letter-spacing: 2.5px;
     text-transform: uppercase;
@@ -1953,7 +2653,7 @@ body.terminal-fullscreen #shell-terminal {
     background: transparent;
     border: none;
     color: rgba(255, 255, 255, 0.45);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 22px;
     line-height: 1;
     cursor: pointer;
@@ -1966,7 +2666,7 @@ body.terminal-fullscreen #shell-terminal {
 
 .modal-title {
     margin: 0 0 4px 0;
-    font-family: 'Bebas Neue', 'Share Tech Mono', monospace;
+    font-family: var(--font-display);
     font-size: 28px;
     letter-spacing: 6px;
     color: var(--amber);
@@ -1975,7 +2675,7 @@ body.terminal-fullscreen #shell-terminal {
 
 .modal-subtitle {
     margin: 0 0 22px 0;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     letter-spacing: 1.5px;
     color: rgba(255, 255, 255, 0.45);
@@ -1992,7 +2692,7 @@ body.terminal-fullscreen #shell-terminal {
 
 .modal-field label {
     margin-bottom: 5px;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     letter-spacing: 2.5px;
     text-transform: uppercase;
@@ -2005,7 +2705,7 @@ body.terminal-fullscreen #shell-terminal {
     border-radius: 0;
     color: var(--text);
     padding: 8px 11px;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
     letter-spacing: 0.5px;
     transition: border-color 0.15s, background 0.15s;
@@ -2045,7 +2745,7 @@ body.terminal-fullscreen #shell-terminal {
     gap: 8px;
     padding: 4px 8px;
     color: rgba(255, 255, 255, 0.45);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     letter-spacing: 2.5px;
     text-transform: uppercase;
@@ -2119,9 +2819,9 @@ body.terminal-fullscreen #shell-terminal {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 6px 0;
-  font-family: 'Share Tech Mono', monospace;
-  font-size: 14px;
-  line-height: 1.5;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 176, 0, 0.25) transparent;
 }
@@ -2139,8 +2839,8 @@ body.terminal-fullscreen #shell-terminal {
 .chat-msg {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  padding: 3px 14px;
+  gap: 7px;
+  padding: 2px 12px;
   animation: log-entry-in 0.25s ease;
   white-space: pre-wrap;
   word-break: break-word;
@@ -2182,10 +2882,10 @@ body.terminal-fullscreen #shell-terminal {
   content: '>';
   display: flex;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 9px;
   color: var(--amber);
-  font-family: 'Share Tech Mono', monospace;
-  font-size: 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
   border-right: 1px solid var(--border);
   background: rgba(255, 176, 0, 0.04);
 }
@@ -2193,10 +2893,10 @@ body.terminal-fullscreen #shell-terminal {
   flex: 1 1 auto;
   border: 0;
   background: transparent;
-  padding: 8px 12px;
+  padding: 7px 10px;
   color: var(--text);
-  font-family: 'Share Tech Mono', monospace;
-  font-size: 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
   outline: none;
 }
 .chat-input-form input::placeholder {
@@ -2211,8 +2911,8 @@ body.terminal-fullscreen #shell-terminal {
   border-left: 1px solid var(--border-orange);
   background: transparent;
   color: var(--orange);
-  font-family: 'Share Tech Mono', monospace;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 2px;
   padding: 0 18px;
@@ -2237,7 +2937,7 @@ body.terminal-fullscreen #shell-terminal {
     flex-direction: column;
     height: 100%;
     background: #000;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: var(--font-mono);
     color: var(--text);
     overflow: hidden;
 }
@@ -2366,4 +3066,3 @@ body.terminal-fullscreen #shell-terminal {
 .fb-detail-value { color: var(--text); }
 .terminal-tab.fb-tab .terminal-tab-name { color: var(--amber); }
 .terminal-tab.fb-tab.active { border-bottom: 2px solid var(--amber); }
-

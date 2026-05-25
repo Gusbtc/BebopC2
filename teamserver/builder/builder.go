@@ -3,6 +3,8 @@ package builder
 import (
 	"context"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -118,9 +120,8 @@ func Build(p BuildParams) ([]byte, error) {
 	srcDir := filepath.Join(tmpDir, beaconSrcName)
 	buildDir := filepath.Join(tmpDir, "build")
 
-	cp := exec.Command("cp", "-r", p.BeaconSrc, srcDir)
-	if out, err := cp.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("copy beacon source: %w\n%s", err, out)
+	if err := copyDir(p.BeaconSrc, srcDir); err != nil {
+		return nil, fmt.Errorf("copy beacon source: %w", err)
 	}
 
 	// Overwrite include/config.h with build-specific values
@@ -157,7 +158,7 @@ func Build(p BuildParams) ([]byte, error) {
 		prefixMap := fmt.Sprintf("-ffile-prefix-map=%s/=", srcDir)
 		configure = exec.CommandContext(ctx, "cmake",
 			"-S", srcDir, "-B", buildDir,
-			"-DCMAKE_C_COMPILER=musl-gcc",
+			"-DCMAKE_C_COMPILER="+linuxCompiler(srcDir),
 			"-DCMAKE_C_FLAGS="+prefixMap)
 	} else {
 		toolchain := filepath.Join(srcDir, "mingw64.cmake")
@@ -199,9 +200,74 @@ func Build(p BuildParams) ([]byte, error) {
 	return data, nil
 }
 
+func linuxCompiler(srcDir string) string {
+	if _, err := os.Stat(filepath.Join(srcDir, "deps", "mbedtls", "CMakeLists.txt")); err == nil {
+		return "musl-gcc"
+	}
+	return "gcc"
+}
+
+func copyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !srcInfo.IsDir() {
+		return fmt.Errorf("%s is not a directory", src)
+	}
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return os.MkdirAll(dst, srcInfo.Mode().Perm())
+		}
+		target := filepath.Join(dst, rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, target)
+		}
+		if d.IsDir() {
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		return copyFile(path, target, info.Mode().Perm())
+	})
+}
+
+func copyFile(src, dst string, mode fs.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
 // donutConvert uses python3-donut to convert a PE to shellcode.
 func donutConvert(payload []byte, args string, bypass int, exitOpt int) ([]byte, error) {
-	tmpDir, err := os.MkdirTemp("", "bebop_donut_")
+	tmpDir, err := os.MkdirTemp("", "stage-donut-*")
 	if err != nil {
 		return nil, fmt.Errorf("temp dir: %w", err)
 	}
